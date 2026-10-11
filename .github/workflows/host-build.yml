@@ -1,0 +1,94 @@
+name: host-build
+
+# Host-side verification: no Android SDK, NDK, device, or GPU required.
+# Two configurations of the same sources are built and tested:
+#   1. host        — engine core + platform + renderer against the mock RHI
+#   2. host-check  — additionally compiles jni_bridge.cpp, the Vulkan 1.3
+#                    backend, and the AAssetManager/ANativeWindow paths against
+#                    the shims in tools/host_check/
+# Warnings are errors for first-party code (-Wall -Wextra -Wshadow upstream).
+
+on:
+  push:
+    branches: [main, 'arena/**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Host unit tests (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Default toolchains preinstalled on the runner image (no version
+          # pins: apt does not guarantee a specific gcc-NN/clang-NN package).
+          - compiler: gcc
+            cc: gcc
+            cxx: g++
+          - compiler: clang
+            cc: clang
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          ${{ matrix.cxx }} --version
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: >
+          cmake -S . -B build/host -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DNOVA_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build/host -j 2
+
+      - name: Test
+        run: ctest --test-dir build/host --output-on-failure
+
+      - name: Test inventory
+        run: ./build/host/engine/tests/nova_tests --list-test-cases
+
+  host-check:
+    name: Android sources compile-check (JNI + Vulkan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Configure (NOVA_HOST_CHECK)
+        run: >
+          cmake -S . -B build/host-check -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DNOVA_HOST_CHECK=ON
+          -DNOVA_BUILD_TESTS=ON
+          -DNOVA_JNI_INCLUDE="$JAVA_HOME/include"
+
+      - name: Build
+        run: cmake --build build/host-check -j 2
+
+      - name: Test
+        run: ctest --test-dir build/host-check --output-on-failure
+
+      - name: Upload test binary
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-check-testing-log
+          path: build/host-check/Testing/Temporary/LastTest.log

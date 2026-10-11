@@ -1,0 +1,112 @@
+#pragma once
+
+// Nova Engine — M1 renderer: gradient background + rotating triangle.
+//
+// Responsibilities of this milestone's renderer:
+//  * own the frame UBO ring (one persistently mapped buffer per frame slot),
+//  * own the triangle vertex buffer and the two pipelines (background is a
+//    vertex-less fullscreen triangle; the hero triangle has a real layout),
+//  * lazily (re)create pipelines when the swapchain format is first known or
+//    changes (dynamic rendering bakes formats into the PSO),
+//  * record the frame: background pass then triangle pass in one
+//    dynamic-rendering scope.
+//
+// Threading: render() runs on the render thread under nova::Engine's frame
+// mutex; init()/shutdown() run during engine init/teardown (no overlap).
+
+#include "core/Math.h"
+#include "core/Result.h"
+#include "core/Types.h"
+#include "rhi/IDevice.h"
+
+#include <array>
+#include <vector>
+
+namespace nova::renderer {
+
+using nova::core::u32;
+
+enum class InitError {
+    MissingShader,
+    ShaderModuleFailed,
+    BufferFailed,
+    PipelineFailed,
+};
+
+const char* initErrorMessage(InitError error);
+
+/// Frame uniform block (std140). MUST match the `FrameUBO` block declared in
+/// shaders/background.* and shaders/triangle.*.
+struct alignas(16) FrameUniforms {
+    math::Mat4 transform;  //   0: clip = transform * position
+    math::Vec4 colorA;     //  64: gradient top color
+    math::Vec4 colorB;     //  80: gradient bottom color
+    math::Vec4 accent;     //  96: engine accent (used for future UI tints)
+    float time = 0.0f;     // 112: seconds since start
+    float aspect = 1.0f;   // 116: viewport width / height
+    float pad0 = 0.0f;     // 120
+    float pad1 = 0.0f;     // 124
+};
+static_assert(sizeof(FrameUniforms) == 128, "FrameUBO std140 layout drift");
+static_assert(offsetof(FrameUniforms, time) == 112, "FrameUBO layout drift");
+
+struct RenderStats {
+    u32 drawCalls = 0;
+    u32 pipelines = 0;
+    u32 frameSlot = 0;
+};
+
+class Renderer : public nova::core::NonCopyable {
+public:
+    Renderer() = default;
+
+    /// Create GPU resources from SPIR-V blobs (the engine loads them through
+    /// the VFS). Safe to call again after shutdown().
+    nova::Result<void, InitError> init(rhi::IDevice& device,
+                                       std::span<const nova::core::u32> backgroundVert,
+                                       std::span<const nova::core::u32> backgroundFrag,
+                                       std::span<const nova::core::u32> triangleVert,
+                                       std::span<const nova::core::u32> triangleFrag);
+
+    /// Release all device resources. Must run before the device is destroyed.
+    void shutdown();
+
+    /// Record + submit nothing itself: fills `frame`'s command buffer.
+    /// Returns false when pipelines could not be created for this format.
+    bool render(rhi::FrameInfo& frame, float timeSeconds);
+
+    bool isInitialized() const { return m_device != nullptr; }
+    const RenderStats& stats() const { return m_stats; }
+
+    /// Initial view-projection (exposed for tests): Vulkan clip space,
+    /// 60° vertical FOV, camera at +Z looking at the origin.
+    static math::Mat4 viewProjection(float aspect);
+
+private:
+    bool ensurePipelines(rhi::Format colorFormat);
+
+    rhi::IDevice* m_device = nullptr;
+
+    // SPIR-V blobs stay alive for pipeline recreation on format changes.
+    std::vector<nova::core::u32> m_backgroundVert;
+    std::vector<nova::core::u32> m_backgroundFrag;
+    std::vector<nova::core::u32> m_triangleVert;
+    std::vector<nova::core::u32> m_triangleFrag;
+
+    nova::rhi::Unique<nova::rhi::IShaderModule> m_backgroundVs;
+    nova::rhi::Unique<nova::rhi::IShaderModule> m_backgroundFs;
+    nova::rhi::Unique<nova::rhi::IShaderModule> m_triangleVs;
+    nova::rhi::Unique<nova::rhi::IShaderModule> m_triangleFs;
+
+    nova::rhi::Unique<nova::rhi::IBuffer> m_vertexBuffer;
+    static constexpr nova::core::u32 kFrameSlots = 2;
+    std::array<nova::rhi::Unique<nova::rhi::IBuffer>, kFrameSlots> m_uniforms{};
+
+    nova::rhi::Unique<nova::rhi::IPipeline> m_backgroundPipeline;
+    nova::rhi::Unique<nova::rhi::IPipeline> m_trianglePipeline;
+    rhi::Format m_pipelineFormat = rhi::Format::Unknown;
+
+    RenderStats m_stats{};
+};
+
+}  // namespace nova::renderer

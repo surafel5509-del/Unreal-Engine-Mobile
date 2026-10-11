@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nova Engine — Android manifest.
+
+  Notes:
+  * No runtime permissions are required for the M0/M1 feature set: engine
+    assets are read from the APK via AAssetManager and all writable state
+    (logs, asset cache) lives in the app-private internal storage, which is
+    always available on API 31+. The vibrate permission (normal level) is
+    declared ahead of the haptics work in later milestones.
+  * configChanges keeps the Activity alive across rotation so the Vulkan
+    surface is resized (nativeResize) instead of tearing down the process.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Nova Engine M1 targets Vulkan 1.3 (dynamic rendering + sync2). -->
+    <uses-feature
+        android:name="android.hardware.vulkan.version"
+        android:version="0x00030000"
+        android:required="true" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.gamepad"
+        android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Nova">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density|fontScale"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="fullUser"
+            android:theme="@style/Theme.Nova">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

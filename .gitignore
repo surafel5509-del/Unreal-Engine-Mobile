@@ -1,0 +1,44 @@
+# Gradle / Android Studio
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+local.properties
+.cxx/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+
+# CMake (host builds)
+cmake-build-*/
+out/
+Testing/
+
+# Kotlin/Java
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / profiling
+*.log
+*.tracy
+
+# Python (asset pipeline)
+__pycache__/
+*.pyc
+.venv/
