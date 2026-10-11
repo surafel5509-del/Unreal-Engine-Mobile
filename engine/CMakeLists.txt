@@ -26,6 +26,10 @@ set(NOVA_RENDERER_SOURCES
     renderer/Renderer.cpp
 )
 
+set(NOVA_SCENE_SOURCES
+    scene/World.cpp
+)
+
 set(NOVA_ENGINE_SOURCES
     Engine.cpp
 )
@@ -44,6 +48,7 @@ add_library(nova_engine STATIC
     ${NOVA_PLATFORM_SOURCES}
     ${NOVA_RHI_SOURCES}
     ${NOVA_RENDERER_SOURCES}
+    ${NOVA_SCENE_SOURCES}
     ${NOVA_ENGINE_SOURCES}
 )
 

@@ -78,9 +78,12 @@ on `core`; `renderer` depends on `rhi` + `core`; `platform` depends on `core`;
 a Vulkan header — only `rhi/vulkan/` does, which is what makes the mock-RHI
 tests possible.
 
-Empty module directories (`engine/scene`, `engine/assets`, `engine/physics`, …)
-are placeholders for later milestones; each has a README stating what lands
-there and which CMake flag enables it.
+`engine/scene` holds the M2 ECS (entity handles, sparse-set component storage,
+`World`, `View`); it depends on `core` only, and `Engine` will own the world
+once the scene-driven pass list replaces the hard-coded M1 passes. The
+remaining module directories (`engine/assets`, `engine/physics`, …) are
+placeholders for later milestones; each has a README stating what lands there
+and which CMake flag enables it.
 
 ---
 
@@ -556,9 +559,9 @@ change, live-resource accounting after init/shutdown, and that a failed
 `createShaderModule` rolls the renderer back to a clean state. That gives
 renderer-behaviour coverage with no GPU, no device, and no Vulkan loader.
 
-Current totals: **41 test cases, 213 assertions**, passing in both the plain
-host build and the host-check build, with zero first-party compiler warnings
-under `-Wall -Wextra -Wshadow`.
+Current totals: **61 test cases, 30 629 assertions** (M0/M1 suites plus the M2
+ECS suite), passing in both the plain host build and the host-check build, with
+zero first-party compiler warnings under `-Wall -Wextra -Wshadow`.
 
 ---
 
@@ -590,7 +593,7 @@ Rules the M0/M1 code already follows, and that later milestones must keep:
 
 | Milestone | Attaches here |
 | --- | --- |
-| M2 ECS + scene | `engine/scene/` (new `nova::scene` namespace); `Renderer` gains a scene-driven pass list; `Engine` owns the world |
+| M2 ECS + scene | `engine/scene/` (`nova::scene`) — **ECS core landed**: `Entity`, `SparseSet`/`ComponentStorage<T>`, `World`, `View<Ts...>`. Remaining: transform hierarchy, cameras, culling, and the scene-driven pass list that lets `Renderer` iterate a world instead of drawing two hard-coded passes |
 | M2 frame graph | Between `Engine::frame` and `Renderer::render`: a pass graph that allocates transient attachments through `IDevice` |
 | M2 glTF/PBR | `engine/assets/` loaders → `rhi` buffers/textures; new pipelines registered by name |
 | M2 GLES backend | `engine/rhi/gles/` implementing `IDevice`; `DeviceFactory` picks it when Vulkan 1.3 is unavailable |

@@ -9,6 +9,7 @@ add_executable(nova_tests
     test_console.cpp
     test_vfs.cpp
     test_renderer.cpp
+    test_ecs.cpp
 )
 
 target_include_directories(nova_tests SYSTEM PRIVATE

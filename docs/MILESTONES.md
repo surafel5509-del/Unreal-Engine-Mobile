@@ -8,7 +8,7 @@ met **and** its code is covered by the host test/compile-check suite.
 | --- | --- | --- | --- |
 | M0 | Project skeleton | Gradle + NDK + CMake, JNI bridge, module layout, host build, test harness | ✅ complete |
 | M1 | Vulkan renderer | Vulkan 1.3 RHI, swapchain, dynamic rendering, M1 demo scene | ✅ complete |
-| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | ⬜ planned |
+| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | 🔄 in progress (ECS core landed) |
 | M3 | Asset pipeline | Cooking, streaming, ASTC/KTX2 textures, asset cache | ⬜ planned |
 | M4 | Rendering features | Shadows, IBL, HDR, post-processing, MSAA/TAA | ⬜ planned |
 | M5 | Physics | Jolt integration, collision shapes, raycasts, character controller | ⬜ planned |
@@ -37,7 +37,7 @@ Acceptance criteria and where each is satisfied:
 | Engine core: types, errors, asserts, log, console, memory, math, time | `engine/core/*` |
 | Platform layer: input queue, virtual file system | `engine/platform/*` |
 | Modular CMake with feature options | Root `CMakeLists.txt` (`NOVA_ENABLE_*`, `NOVA_BUILD_TESTS`, `NOVA_HOST_CHECK`, `NOVA_ENABLE_LTO`, `NOVA_ENABLE_SANITIZERS`) |
-| Unit-test harness for non-trivial modules | `engine/tests/` + CTest; 41 cases / 213 assertions |
+| Unit-test harness for non-trivial modules | `engine/tests/` + CTest; 41 cases / 213 assertions at M0 close (61 / 30 629 including the M2 ECS suite) |
 | Host compile-check of Android-only sources | `-DNOVA_HOST_CHECK=ON` with `tools/host_check/` shims |
 | Third-party dependencies reproducible | Submodules (`vulkan-headers`, `glm`) + vendored single-header libs (`vk_mem_alloc` 3.1.0, `doctest` 2.4.11) |
 | README with Android Studio + CLI instructions | Root [README.md](../README.md) |
@@ -80,16 +80,33 @@ post-M1), and the console has no on-screen overlay (M9).
 
 ---
 
-## M2 — Scene, ECS, glTF, PBR (next)
+## M2 — Scene, ECS, glTF, PBR (in progress)
 
 **Goal:** render a real 3D scene: an ECS-driven scene graph, glTF 2.0 models
 with PBR materials, a frame graph for pass ordering and transient attachments,
 and the GLES 3.2 fallback backend.
 
-Planned acceptance criteria:
+### Landed so far
 
-* `engine/scene/`: entity/component storage (dense arrays, stable handles),
-  transform hierarchy, per-frame culling; unit-tested on host.
+✅ **ECS core** — `engine/scene/`:
+
+| Piece | File | Notes |
+| --- | --- | --- |
+| Entity handles | `Entity.h` | slot index + generation; recycled slots bump the generation so stale handles fail `isAlive()`; `std::hash` specialization |
+| Sparse-set storage | `ComponentStorage.h` | O(1) insert/find/erase (swap-remove), dense value array parallel to the index array, type-erased `IComponentStorage` purge path, RTTI-free `componentTypeId<T>()` |
+| Registry | `World.h` / `World.cpp` | create/destroy with slot recycling, typed `add`/`remove`/`get`/`has`/`count`, storage vector indexed by type id, `Stats` diagnostics; no exceptions (mutations on dead handles log + fail) |
+| Iteration | `View.h` | `View<Ts...>` intersects over the smallest matching storage; iterators yield `std::tuple<Entity, Ts&...>` for structured bindings and in-place mutation; `each()`, `collectEntities()`, `size()` |
+
+Covered by `engine/tests/test_ecs.cpp` (20 cases: handle semantics, sparse-set
+behaviour, non-trivial component moves, purge-on-destroy, view
+intersection/mutation/empty-storage paths, 10 000-entity churn). Host and
+host-check builds stay warning-free.
+
+### Remaining acceptance criteria
+
+* `engine/scene/`: transform hierarchy (parent/child, dirty propagation, world
+  matrices), camera components, per-frame frustum culling and draw-list
+  generation.
 * `engine/assets/`: glTF 2.0 (binary + JSON) loader → meshes/materials/textures
   through the RHI; KTX2/ASTC decode path stubbed for M3.
 * PBR pipeline: metallic-roughness BRDF, IBL-ready (full IBL in M4), depth
@@ -98,10 +115,10 @@ Planned acceptance criteria:
   automatic barrier/transition insertion; replaces the hard-coded two-pass loop.
 * `engine/rhi/gles/`: `IDevice` implementation on OpenGL ES 3.2 with a
   capability-based fallback in `DeviceFactory` (Vulkan 1.3 → GLES 3.2 → error).
-* Camera system: perspective/orthographic, view-projection from a scene camera
-  component (replacing `Renderer::viewProjection`).
+* `Engine` owns the `World` and drives it from `frame()`; the `stats` console
+  command reports `World::Stats`.
 * Sample: `samples/gltf_viewer` — load a bundled model, orbit camera, touch drag.
-* Tests: ECS storage/layout, glTF parsing (host, fixture files), culling math,
+* Tests: transform hierarchy + culling math, glTF parsing (host, fixture files),
   frame-graph ordering, mock-RHI transcript for the new passes.
 
 ---

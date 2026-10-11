@@ -23,7 +23,7 @@ double-buffered FIFO/Mailbox swapchain.
 | --- | --- | --- |
 | **M0** | Project skeleton: Gradle (Kotlin DSL) + NDK + CMake, manifest, JNI bridge, module layout, host build, test harness | ✅ done |
 | **M1** | Vulkan 1.3 RHI + renderer: instance/device/VMA, swapchain, dynamic rendering, pipelines, per-frame UBO ring, input queue, console, gradient + rotating triangle demo | ✅ done |
-| M2 | ECS, scene graph, glTF 2.0 loading, PBR shading, frame graph | planned |
+| **M2** | ECS, scene graph, glTF 2.0 loading, PBR shading, frame graph | 🔄 in progress — ECS core (`engine/scene`) landed |
 | M3 | Asset pipeline: cooking, streaming, texture compression (ASTC/KTX2) | planned |
 | M4 | Rendering features: shadows, IBL, post-processing, HDR | planned |
 | M5–M9 | Physics (Jolt), animation (ozz), audio (Oboe), Lua scripting, UI (RmlUi), networking (ENet), tooling/editor core | planned |
@@ -164,7 +164,7 @@ Override per-invocation:
 Everything that does not need a GPU or an Android device is verified on the
 host. This is the same entry point CI uses.
 
-### 4.1 Unit tests (41 test cases, 213 assertions)
+### 4.1 Unit tests (61 test cases, 30 629 assertions)
 
 ```bash
 cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNOVA_BUILD_TESTS=ON
@@ -190,6 +190,7 @@ Run the binary directly for doctest filtering:
 | `test_console.cpp` | Tokenization, quoted arguments, execution, unknown/empty commands, sorted `help`, command replacement |
 | `test_vfs.cpp` | Data mount read/normalize, missing files, temporary directories |
 | `test_renderer.cpp` | Mock-RHI: init + rollback on failure, exact recorded draw sequence, UBO ring alternation, pipeline rebuild on format change, frame skipping, view-projection aspect/Y-flip |
+| `test_ecs.cpp` | M2 ECS: entity handles + generation recycling, sparse-set swap-remove, non-trivial component moves, purge-on-destroy, view intersection/mutation/empty-storage paths, 10 000-entity churn |
 
 ### 4.2 Compile-checking the Android-only code on the host
 
@@ -294,7 +295,8 @@ Unreal-Engine-Mobile/
 │   │   ├── vulkan/             Vulkan 1.3 backend (device, swapchain, resources)
 │   │   └── gles/               OpenGL ES 3.2 fallback (post-M1)
 │   ├── renderer/               M1 renderer: gradient + triangle passes
-│   ├── scene/ assets/ physics/ audio/ animation/
+│   ├── scene/                  M2 ECS: Entity, ComponentStorage, World, View
+│   ├── assets/ physics/ audio/ animation/
 │   ├── scripting/ ui/ net/ editor_core/     (later milestones — see each README)
 │   └── tests/                  doctest suites + CMake/CTest wiring
 ├── shaders/                    GLSL sources (compiled by tools/compile_shaders.sh)
