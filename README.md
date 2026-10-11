@@ -14,16 +14,18 @@ C++20 engine: core → platform → rhi → renderer → scene → …
 Vulkan 1.3 (dynamic rendering, synchronization2, VMA)
 ```
 
-**Current status: Milestones M0 + M1 complete.** The `app` module builds and
-runs a real Vulkan renderer: an animated full-screen gradient with a rotating,
-vertex-coloured triangle on top, presented at display refresh rate through a
+**Current status: Milestones M0 + M1 complete, M2 in progress.** The `app`
+module builds and runs a real Vulkan renderer: an animated full-screen gradient
+with a rotating, vertex-coloured triangle on top — now drawn from an ECS scene
+(hierarchy → frustum cull → front-to-back sort → draw list) rather than two
+hard-coded passes — presented at display refresh rate through a
 double-buffered FIFO/Mailbox swapchain.
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
 | **M0** | Project skeleton: Gradle (Kotlin DSL) + NDK + CMake, manifest, JNI bridge, module layout, host build, test harness | ✅ done |
 | **M1** | Vulkan 1.3 RHI + renderer: instance/device/VMA, swapchain, dynamic rendering, pipelines, per-frame UBO ring, input queue, console, gradient + rotating triangle demo | ✅ done |
-| **M2** | ECS, scene graph, glTF 2.0 loading, PBR shading, frame graph | 🔄 in progress — ECS core (`engine/scene`) landed |
+| **M2** | ECS, scene graph, glTF 2.0 loading, PBR shading, frame graph | 🔄 in progress — ECS core, transform hierarchy, cameras + frustum culling and the scene-driven draw list landed |
 | M3 | Asset pipeline: cooking, streaming, texture compression (ASTC/KTX2) | planned |
 | M4 | Rendering features: shadows, IBL, post-processing, HDR | planned |
 | M5–M9 | Physics (Jolt), animation (ozz), audio (Oboe), Lua scripting, UI (RmlUi), networking (ENet), tooling/editor core | planned |
@@ -37,8 +39,13 @@ See [docs/MILESTONES.md](docs/MILESTONES.md) for the roadmap and
 
 * A smooth vertical gradient (deep indigo → near black) that shifts over time,
   drawn as a full-screen triangle.
-* A rotating triangle with per-vertex colours (violet / cyan / pink), spinning
-  around the Z axis, with a projection-correct aspect ratio.
+* A rotating triangle with per-vertex colours (violet / cyan / pink), tumbling
+  around the Y and Z axes with a projection-correct aspect ratio. Its world
+  matrix comes from the ECS scene graph: each frame `Engine` animates a
+  `Transform`, evaluates the hierarchy, frustum-culls against the camera entity,
+  sorts front-to-back and hands the resulting draw list to the renderer — so the
+  image is identical to M1's while the path through the engine is now the real
+  one.
 * Rotation follows display refresh (60 Hz and 120 Hz panels both pace correctly).
 * Touch and key events flow into the engine's platform-independent input queue
   (`nova::platform::InputQueue`), drained once per frame.
@@ -164,7 +171,7 @@ Override per-invocation:
 Everything that does not need a GPU or an Android device is verified on the
 host. This is the same entry point CI uses.
 
-### 4.1 Unit tests (92 test cases, 51 261 assertions)
+### 4.1 Unit tests (111 test cases, 51 448 assertions)
 
 ```bash
 cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNOVA_BUILD_TESTS=ON
@@ -189,10 +196,11 @@ Run the binary directly for doctest filtering:
 | `test_input.cpp` | FIFO order, drop-oldest overflow policy, `lastPosition`, 4-thread producer stress |
 | `test_console.cpp` | Tokenization, quoted arguments, execution, unknown/empty commands, sorted `help`, command replacement |
 | `test_vfs.cpp` | Data mount read/normalize, missing files, temporary directories |
-| `test_renderer.cpp` | Mock-RHI: init + rollback on failure, exact recorded draw sequence, UBO ring alternation, pipeline rebuild on format change, frame skipping, view-projection aspect/Y-flip |
+| `test_renderer.cpp` | Mock-RHI: init + rollback on failure, exact recorded draw sequence, per-command UBO slice offsets and contents, draw-list budget/unknown-mesh drops, empty draw list, UBO ring alternation, pipeline rebuild on format change, frame skipping, view-projection aspect/Y-flip |
 | `test_ecs.cpp` | M2 ECS: entity handles + generation recycling, sparse-set swap-remove, non-trivial component moves, purge-on-destroy, view intersection/mutation/empty-storage paths, 10 000-entity churn |
 | `test_transform.cpp` | M2 hierarchy: `Transform::localMatrix` composition, parenting/detach, cycle rejection, world-matrix accumulation (translation/rotation/scale), orphans, direct-cycle detection, 1 000-deep chain, 8 192-entity wide hierarchy |
 | `test_culling.cpp` | M2 cameras + culling: perspective/orthographic projection (Vulkan Y flip, `[0,1]` depth), view-matrix inversion, frustum plane extraction and point/sphere/AABB tests, world-space AABB derivation, camera exclusion, parented cameras, front-to-back sorting, 4 000-object scene |
+| `test_drawlist.cpp` | M2 scene→renderer bridge: `buildDrawCommands` order/skip rules, append semantics, full scene stage (hierarchy → cull → sort → draw list), the camera entity reproducing the M1 reference view-projection, the tumble matrix, and a 2 000-object scene |
 
 ### 4.2 Compile-checking the Android-only code on the host
 
@@ -296,7 +304,7 @@ Unreal-Engine-Mobile/
 │   ├── rhi/                    IDevice contract, RhiTypes, DeviceFactory
 │   │   ├── vulkan/             Vulkan 1.3 backend (device, swapchain, resources)
 │   │   └── gles/               OpenGL ES 3.2 fallback (post-M1)
-│   ├── renderer/               M1 renderer: gradient + triangle passes
+│   ├── renderer/               Renderer: gradient pass + scene-driven draw list
 │   ├── scene/                  M2 ECS, transform hierarchy, cameras, frustum culling
 │   ├── assets/ physics/ audio/ animation/
 │   ├── scripting/ ui/ net/ editor_core/     (later milestones — see each README)

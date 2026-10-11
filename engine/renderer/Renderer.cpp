@@ -96,12 +96,18 @@ nova::Result<void, InitError> Renderer::init(
     std::memcpy(m_vertexBuffer->mappedData(), kTriangleVertices.data(),
                 sizeof(kTriangleVertices));
 
-    // One persistently mapped UBO per frame slot (matches frames-in-flight).
+    // One persistently mapped UBO per frame slot (matches frames-in-flight),
+    // sliced per object: slice 0 is the camera/background block, slices 1..N
+    // hold one FrameUniforms each for the frame's draw commands.
+    constexpr nova::core::usize kUniformBufferBytes =
+        (static_cast<nova::core::usize>(kMaxDrawCommandsPerFrame) + 1) * kUniformSliceBytes;
+    static_assert(kUniformSliceBytes >= sizeof(FrameUniforms), "UBO slice too small");
+
     for (u32 slot = 0; slot < kFrameSlots; ++slot) {
         rhi::BufferDesc uniformDesc{};
         uniformDesc.usage = rhi::BufferUsage::Uniform;
         uniformDesc.domain = rhi::BufferDomain::HostVisible;
-        uniformDesc.size = sizeof(FrameUniforms);
+        uniformDesc.size = kUniformBufferBytes;
         uniformDesc.debugName = "nova.frame.ubo";
         m_uniforms[slot] = device.createBuffer(uniformDesc);
         if (m_uniforms[slot] == nullptr) {
@@ -110,11 +116,11 @@ nova::Result<void, InitError> Renderer::init(
         }
         // Zero-initialize so the first frame is defined even if render()
         // is interrupted.
-        std::memset(m_uniforms[slot]->mappedData(), 0, sizeof(FrameUniforms));
+        std::memset(m_uniforms[slot]->mappedData(), 0, kUniformBufferBytes);
     }
 
     m_stats = RenderStats{};
-    NOVA_LOG_INFO("renderer: initialized (M1 gradient + triangle)");
+    NOVA_LOG_INFO("renderer: initialized (gradient background + scene draw list)");
     return nova::Result<void, InitError>::success();
 }
 
@@ -196,7 +202,23 @@ bool Renderer::ensurePipelines(rhi::Format colorFormat) {
     return true;
 }
 
-bool Renderer::render(rhi::FrameInfo& frame, float timeSeconds) {
+rhi::IPipeline* Renderer::pipelineFor(BuiltinMesh mesh) const {
+    switch (mesh) {
+        case BuiltinMesh::kTriangle: return m_trianglePipeline.get();
+        case BuiltinMesh::kNone: break;
+    }
+    return nullptr;
+}
+
+u32 Renderer::vertexCountFor(BuiltinMesh mesh) {
+    switch (mesh) {
+        case BuiltinMesh::kTriangle: return 3;
+        case BuiltinMesh::kNone: break;
+    }
+    return 0;
+}
+
+bool Renderer::render(rhi::FrameInfo& frame, const SceneSnapshot& snapshot) {
     NOVA_ENSURE(m_device != nullptr, "render before init");
     NOVA_ENSURE(frame.commands != nullptr && frame.backbuffer != nullptr,
                 "render without a valid frame");
@@ -207,24 +229,23 @@ bool Renderer::render(rhi::FrameInfo& frame, float timeSeconds) {
     const u32 slot = frame.ringIndex < kFrameSlots ? frame.ringIndex : 0;
     NOVA_ENSURE(m_uniforms[slot] != nullptr, "missing frame UBO slot");
 
-    const float aspect =
-        frame.height > 0 ? static_cast<float>(frame.width) / static_cast<float>(frame.height)
-                         : 1.0f;
+    const float aspect = snapshot.aspect > 0.0f
+                             ? snapshot.aspect
+                             : (frame.height > 0
+                                    ? static_cast<float>(frame.width) / static_cast<float>(frame.height)
+                                    : 1.0f);
 
-    FrameUniforms uniforms{};
-    uniforms.transform = viewProjection(aspect);
-    uniforms.colorA = math::Vec4(0.055f, 0.063f, 0.145f, 1.0f);  // deep indigo (top)
-    uniforms.colorB = math::Vec4(0.008f, 0.012f, 0.031f, 1.0f);  // near black (bottom)
-    uniforms.accent = math::Vec4(0.486f, 0.302f, 1.0f, 1.0f);    // #7C4DFF
-    uniforms.time = timeSeconds;
-    uniforms.aspect = aspect;
+    // Slice 0: camera + palette constants shared by every pass this frame.
+    FrameUniforms base{};
+    base.transform = snapshot.viewProjection;
+    base.colorA = math::Vec4(0.055f, 0.063f, 0.145f, 1.0f);  // deep indigo (top)
+    base.colorB = math::Vec4(0.008f, 0.012f, 0.031f, 1.0f);  // near black (bottom)
+    base.accent = math::Vec4(0.486f, 0.302f, 1.0f, 1.0f);    // #7C4DFF
+    base.time = snapshot.timeSeconds;
+    base.aspect = aspect;
 
-    // Slow tumble so the triangle visibly rotates in 3D.
-    uniforms.transform =
-        uniforms.transform *
-        (math::rotationY(timeSeconds * 0.9f) * math::rotationZ(timeSeconds * 0.55f));
-
-    std::memcpy(m_uniforms[slot]->mappedData(), &uniforms, sizeof(uniforms));
+    auto* uniformBytes = static_cast<nova::core::u8*>(m_uniforms[slot]->mappedData());
+    std::memcpy(uniformBytes, &base, sizeof(base));
 
     rhi::ICommandBuffer* commands = frame.commands;
     rhi::ColorAttachment color{};
@@ -240,15 +261,48 @@ bool Renderer::render(rhi::FrameInfo& frame, float timeSeconds) {
     commands->bindUniformBuffer(0, m_uniforms[slot].get(), 0, sizeof(FrameUniforms));
     commands->draw(3);
 
-    // 2) Rotating hero triangle.
-    commands->bindPipeline(m_trianglePipeline.get());
-    commands->bindVertexBuffer(m_vertexBuffer.get());
-    commands->bindUniformBuffer(0, m_uniforms[slot].get(), 0, sizeof(FrameUniforms));
-    commands->draw(3);
+    // 2) One pass per draw command, each with its own UBO slice (and therefore
+    //    its own descriptor set — the device allocates one per bind).
+    u32 draws = 1;
+    u32 dropped = 0;
+    const nova::core::usize commandCount = snapshot.commands.size();
+    const nova::core::usize budget =
+        commandCount < kMaxDrawCommandsPerFrame ? commandCount : kMaxDrawCommandsPerFrame;
+
+    for (nova::core::usize index = 0; index < commandCount; ++index) {
+        const DrawCommand& command = snapshot.commands[index];
+        rhi::IPipeline* pipeline = pipelineFor(command.mesh);
+        const u32 vertexCount = vertexCountFor(command.mesh);
+        if (pipeline == nullptr || vertexCount == 0) {
+            ++dropped;  // unknown mesh: nothing to draw, not a budget problem
+            continue;
+        }
+        if (index >= budget) {
+            ++dropped;
+            continue;
+        }
+
+        FrameUniforms slice = base;
+        slice.transform = snapshot.viewProjection * command.world;
+        const nova::core::usize offset = (index + 1) * kUniformSliceBytes;
+        std::memcpy(uniformBytes + offset, &slice, sizeof(slice));
+
+        commands->bindPipeline(pipeline);
+        commands->bindVertexBuffer(m_vertexBuffer.get());
+        commands->bindUniformBuffer(0, m_uniforms[slot].get(), offset, sizeof(FrameUniforms));
+        commands->draw(vertexCount);
+        ++draws;
+    }
+
+    if (dropped > 0) {
+        NOVA_LOG_WARN("renderer: dropped %u draw command(s) (budget %u per frame)", dropped,
+                         kMaxDrawCommandsPerFrame);
+    }
 
     commands->endRendering();
 
-    m_stats.drawCalls = 2;
+    m_stats.drawCalls = draws;
+    m_stats.droppedCommands = dropped;
     m_stats.frameSlot = slot;
     return true;
 }

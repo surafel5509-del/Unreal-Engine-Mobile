@@ -3,8 +3,11 @@
 **Namespace:** `nova::scene`  ·  **Milestone:** M2 (in progress)  ·  **CMake flag:** n/a (always built)
 
 Scene representation: entity/component storage, transform hierarchy, cameras,
-culling. Replaces the hard-coded two-pass loop in `engine/renderer` with a
-data-driven pass list.
+culling. `nova::Engine` owns the `World` and runs the scene stage each frame;
+the result reaches the GPU as a `renderer::SceneSnapshot` draw list (see
+[`engine/renderer/README.md`](../renderer/README.md)). This module depends on
+`core` only and never includes a renderer or RHI header — the single component
+the renderer needs (`MeshRef`) is declared on the renderer side.
 
 ## What is here now (M2)
 
@@ -98,18 +101,46 @@ intersection/mutation/empty-storage paths, 10 000-entity churn),
 `engine/tests/test_transform.cpp` (16 cases — matrix composition, parenting and
 detach, cycle rejection, translation/rotation/scale inheritance, orphans,
 direct cycles, deep chain, wide hierarchy) and
-`engine/tests/test_culling.cpp` (14 cases — projection conventions, view-matrix
+`engine/tests/test_culling.cpp` (15 cases — projection conventions, view-matrix
 inversion, frustum plane extraction and point/sphere/AABB tests, world AABB
 derivation, camera exclusion and failure paths, orthographic volumes, parented
 cameras, front-to-back ordering, 4 000-object scene).
 
+## Consumed by the renderer
+
+`renderer::buildDrawCommands(world, visible, out)` turns a culled, sorted entity
+list into `DrawCommand`s: an entity is drawn when it owns both a
+`renderer::MeshRef` (with a real mesh) and a `WorldTransform` (written by
+`SceneHierarchy::update`). `renderer::runSceneStage()` runs the whole stage for
+one frame — this is what `Engine::updateScene` calls after animating:
+
+```cpp
+renderer::SceneStageInput input{};
+input.world = &m_world;
+input.hierarchy = &m_hierarchy;
+input.cameraEntity = m_cameraEntity;
+input.timeSeconds = m_engineTime;
+input.aspect = width / height;                 // from the swapchain
+
+// writes camera.aspectRatio, evaluates the hierarchy, culls, sorts and fills
+// both m_drawCommands and the snapshot the renderer consumes
+renderer::runSceneStage(input, m_visible, m_drawCommands, snapshot, &output);
+```
+
+It fails closed — empty draw list, identity view-projection, `false` — when the
+camera entity has no `Camera`/`WorldTransform`, so a caller can skip the frame
+instead of rendering garbage.
+
+Covered end to end by `engine/tests/test_drawlist.cpp` (15 cases), including a
+check that the camera entity reproduces `Renderer::viewProjection(aspect)`
+element by element, so the M1 image cannot drift.
+
 ## Still planned for M2
 
-* Pass list consumed by `renderer::Renderer`, so the renderer iterates a culled
-  world instead of drawing two hard-coded passes
+* glTF 2.0 assets feeding meshes/materials/textures into the draw list
+  (`engine/assets`), replacing the single builtin mesh
+* PBR pipeline with a depth attachment (`D32_SFloat`) and depth test
 * Frame graph: passes declare reads/writes; transient attachments and barriers
-* `Engine` owns the `World` + `SceneHierarchy` and drives them from `frame()`;
-  the `stats` console command reports `World::Stats` and `CullStats`
 
 ## Rules for new code here
 

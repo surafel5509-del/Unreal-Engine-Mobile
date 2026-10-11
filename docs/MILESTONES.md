@@ -8,7 +8,7 @@ met **and** its code is covered by the host test/compile-check suite.
 | --- | --- | --- | --- |
 | M0 | Project skeleton | Gradle + NDK + CMake, JNI bridge, module layout, host build, test harness | ✅ complete |
 | M1 | Vulkan renderer | Vulkan 1.3 RHI, swapchain, dynamic rendering, M1 demo scene | ✅ complete |
-| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | 🔄 in progress (ECS, transform hierarchy, cameras + culling landed) |
+| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | 🔄 in progress (ECS, transform hierarchy, cameras + culling, scene-driven draw list landed) |
 | M3 | Asset pipeline | Cooking, streaming, ASTC/KTX2 textures, asset cache | ⬜ planned |
 | M4 | Rendering features | Shadows, IBL, HDR, post-processing, MSAA/TAA | ⬜ planned |
 | M5 | Physics | Jolt integration, collision shapes, raycasts, character controller | ⬜ planned |
@@ -73,10 +73,12 @@ Acceptance criteria and where each is satisfied:
 | Tests for the non-trivial parts | `engine/tests/test_renderer.cpp` (mock RHI: rollback, exact draw transcript, UBO alternation, format-change rebuild, frame skip, view-projection), plus core/platform suites |
 
 **Known M1 limitations (by design, scheduled later):** no depth buffer or depth
-test (M2/M4), no texture sampling (M2), no scene graph — the two passes are
-hard-coded in `Renderer` (M2), single uniform slot (M2), Vulkan-only — the GLES
-3.2 fallback backend directory exists but is not compiled (`NOVA_ENABLE_RHI_GLES`,
-post-M1), and the console has no on-screen overlay (M9).
+test (M2/M4), no texture sampling (M2), no scene graph — the two passes were
+hard-coded in `Renderer` (**resolved in M2**: the renderer now iterates a
+scene-driven draw list), single uniform slot (**resolved in M2**: 33 slices per
+frame buffer), Vulkan-only — the GLES 3.2 fallback backend directory exists but
+is not compiled (`NOVA_ENABLE_RHI_GLES`, post-M1), and the console has no
+on-screen overlay (M9).
 
 ---
 
@@ -132,7 +134,7 @@ Entities without `Bounds` are kept and reported as `unbounded` rather than
 dropped — an unknown extent is not a reason to discard a light, a camera or a
 logical node.
 
-Covered by `engine/tests/test_culling.cpp` (14 cases: projection conventions and
+Covered by `engine/tests/test_culling.cpp` (15 cases: projection conventions and
 clip-space corners, view-matrix inversion, plane extraction with true
 world-space near distances, sphere/AABB conservativeness, world AABB derivation
 under translation and rotation, camera exclusion, non-camera failure paths,
@@ -140,23 +142,42 @@ orthographic volumes, parented cameras driven through `SceneHierarchy`,
 front-to-back ordering, and a 4 000-object scene whose expectations are derived
 from the depth slab rather than hard-coded counts).
 
+✅ **Scene-driven draw list** — `engine/renderer/` + `engine/Engine.cpp`:
+
+| Piece | File | Notes |
+| --- | --- | --- |
+| Draw-list contract | `renderer/DrawList.h` / `.cpp` | `MeshRef{BuiltinMesh, tint}` component, `DrawCommand{mesh, world, tint}`, `SceneSnapshot{viewProjection, time, aspect, span<DrawCommand>}`, `buildDrawCommands()` — appends in the caller's order, skips entities without a mesh or a world matrix |
+| Per-object uniforms | `renderer/Renderer.cpp` | Frame UBO grows from 128 B to `33 · 256` B per slot: slice 0 = camera block, slice `i + 1` = draw command `i` (`viewProjection · world`). One descriptor set per bind, so no shader/SPIR-V change was needed; overflow past 32 commands is dropped and counted |
+| Scene stage | `renderer::runSceneStage()` | The whole per-frame scene pass as one host-testable free function: writes the viewport aspect into the `Camera`, evaluates `SceneHierarchy`, culls, sorts front-to-back, builds the draw list and fills the snapshot; fails closed (empty list, identity matrix) when the camera is unusable |
+| Engine wiring | `engine/Engine.cpp` | `Engine` owns `scene::World` + `SceneHierarchy`; per frame it animates the demo `Transform`, calls `runSceneStage()` and hands the snapshot to `Renderer::render(frame, snapshot)`. The visible/draw-list vectors are reused, so the frame loop stays allocation-free |
+| Demo scene | `Engine::createDemoScene()` | Camera entity at `(0, 0, 3)` (60° FOV, `[0.1, 100]`) + one drawable entity at the origin with `Bounds`; the placement reproduces M1's `lookAt` exactly, so the on-device image is unchanged |
+| Diagnostics | `stats` console command | Now also reports `World::Stats`, `CullStats` and `RenderStats` (draw calls, dropped commands, pipelines, frame slot) |
+
+Covered by `engine/tests/test_drawlist.cpp` (15 cases: `buildDrawCommands` order
+preservation, skip rules and append semantics; the full scene stage over a
+5-object scene; the camera entity reproducing `Renderer::viewProjection()`
+element by element; the tumble matrix matching M1's; `runSceneStage` snapshot
+contents, hierarchy re-evaluation, vector reuse across frames, and its
+failure paths for a missing/destroyed camera and null world/hierarchy; and a
+2 000-object scene) plus 4 new mock-RHI cases in `test_renderer.cpp` (slice
+offsets and contents, budget drops, unknown-mesh skips, empty list). Because the
+scene stage lives in `renderer::runSceneStage()` rather than inside `Engine`,
+the per-frame path is covered on the host even though `Engine::init()` needs a
+real Vulkan device.
+
 ### Remaining acceptance criteria
 
-* `engine/scene/`: the pass list that lets `Renderer` iterate a culled world
-  instead of drawing two hard-coded passes.
 * `engine/assets/`: glTF 2.0 (binary + JSON) loader → meshes/materials/textures
   through the RHI; KTX2/ASTC decode path stubbed for M3.
 * PBR pipeline: metallic-roughness BRDF, IBL-ready (full IBL in M4), depth
   attachment (`D32_SFloat`) with depth test enabled, MSAA optional.
 * Frame graph: passes declare reads/writes; transient attachment allocation,
-  automatic barrier/transition insertion; replaces the hard-coded two-pass loop.
+  automatic barrier/transition insertion; replaces the linear draw-list loop.
 * `engine/rhi/gles/`: `IDevice` implementation on OpenGL ES 3.2 with a
   capability-based fallback in `DeviceFactory` (Vulkan 1.3 → GLES 3.2 → error).
-* `Engine` owns the `World` and drives it from `frame()`; the `stats` console
-  command reports `World::Stats`.
 * Sample: `samples/gltf_viewer` — load a bundled model, orbit camera, touch drag.
-* Tests: transform hierarchy + culling math, glTF parsing (host, fixture files),
-  frame-graph ordering, mock-RHI transcript for the new passes.
+* Tests: glTF parsing (host, fixture files), frame-graph ordering, mock-RHI
+  transcript for the new passes.
 
 ---
 

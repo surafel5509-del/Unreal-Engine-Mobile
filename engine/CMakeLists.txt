@@ -23,6 +23,7 @@ set(NOVA_RHI_SOURCES
 )
 
 set(NOVA_RENDERER_SOURCES
+    renderer/DrawList.cpp
     renderer/Renderer.cpp
 )
 

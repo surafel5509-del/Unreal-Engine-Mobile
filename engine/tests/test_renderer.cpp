@@ -30,6 +30,8 @@ struct Event {
     EventKind kind;
     std::string name;   // pipeline / buffer debug name
     nova::core::u32 count = 0;  // draw vertex count or uniform slot
+    nova::core::usize offset = 0;  // uniform slice offset within the buffer
+    const IBuffer* buffer = nullptr;  // bound uniform buffer, for content checks
 };
 
 // ------------------------------------------------------------------- resources
@@ -115,9 +117,12 @@ public:
                                                               : "?",
                           0});
     }
-    void bindUniformBuffer(nova::core::u32 slot, const IBuffer*, nova::core::usize,
+    void bindUniformBuffer(nova::core::u32 slot, const IBuffer* buffer, nova::core::usize offset,
                            nova::core::usize) override {
-        events.push_back({EventKind::BindUniform, "", slot});
+        Event event{EventKind::BindUniform, "", slot};
+        event.offset = offset;
+        event.buffer = buffer;
+        events.push_back(event);
     }
     void draw(nova::core::u32 vertexCount, nova::core::u32, nova::core::u32,
               nova::core::u32) override {
@@ -215,6 +220,51 @@ std::vector<nova::core::u32> fakeSpirv() {
     return words;
 }
 
+/// Snapshot matching what Engine::updateScene() hands the renderer each frame.
+renderer::SceneSnapshot makeSnapshot(
+    float timeSeconds, float aspect,
+    std::span<const renderer::DrawCommand> commands = {}) {
+    renderer::SceneSnapshot snapshot{};
+    snapshot.viewProjection = renderer::Renderer::viewProjection(aspect);
+    snapshot.timeSeconds = timeSeconds;
+    snapshot.aspect = aspect;
+    snapshot.commands = commands;
+    return snapshot;
+}
+
+/// One draw command per element, all of them the builtin triangle mesh.
+std::vector<renderer::DrawCommand> triangleCommands(nova::core::usize count) {
+    std::vector<renderer::DrawCommand> commands;
+    commands.reserve(count);
+    for (nova::core::usize index = 0; index < count; ++index) {
+        renderer::DrawCommand command{};
+        command.mesh = renderer::BuiltinMesh::kTriangle;
+        command.world = nova::math::translation(
+            nova::math::Vec3(static_cast<float>(index), 0.0f, 0.0f));
+        commands.push_back(command);
+    }
+    return commands;
+}
+
+/// Uniform slice recorded for the Nth BindUniform event of `events`.
+const renderer::FrameUniforms* sliceAt(const std::vector<Event>& events,
+                                       nova::core::usize bindIndex) {
+    nova::core::usize seen = 0;
+    for (const Event& event : events) {
+        if (event.kind != EventKind::BindUniform) continue;
+        if (seen == bindIndex) {
+            if (event.buffer == nullptr) return nullptr;
+            const auto* mock = static_cast<const MockBuffer*>(event.buffer);
+            const auto& storage = mock->storage();
+            if (event.offset + sizeof(renderer::FrameUniforms) > storage.size()) return nullptr;
+            return reinterpret_cast<const renderer::FrameUniforms*>(storage.data() +
+                                                                    event.offset);
+        }
+        ++seen;
+    }
+    return nullptr;
+}
+
 std::string sequenceString(const std::vector<Event>& events) {
     std::string out;
     for (const Event& event : events) {
@@ -222,7 +272,10 @@ std::string sequenceString(const std::vector<Event>& events) {
             case EventKind::BeginRendering: out += "begin;"; break;
             case EventKind::BindPipeline: out += "pipe:" + event.name + ";"; break;
             case EventKind::BindVertexBuffer: out += "vbo:" + event.name + ";"; break;
-            case EventKind::BindUniform: out += "ubo:" + std::to_string(event.count) + ";"; break;
+            case EventKind::BindUniform:
+                out += "ubo:" + std::to_string(event.count) + "@" +
+                       std::to_string(event.offset) + ";";
+                break;
             case EventKind::Draw:
                 out += "draw:" + event.name + ":" + std::to_string(event.count) + ";";
                 break;
@@ -262,7 +315,137 @@ TEST_CASE("Renderer fails cleanly when shader modules cannot be created") {
     CHECK(device.liveResources == 0);
 }
 
-TEST_CASE("Renderer records background then triangle in one rendering scope") {
+TEST_CASE("Renderer records background then one pass per draw command") {
+    MockDevice device;
+    renderer::Renderer renderer;
+    const auto spirv = fakeSpirv();
+    REQUIRE(renderer.init(device, spirv, spirv, spirv, spirv).isOk());
+
+    const std::vector<renderer::DrawCommand> commands = triangleCommands(1);
+
+    rhi::FrameInfo frame{};
+    REQUIRE(device.beginFrame(frame));
+    CHECK(renderer.render(frame, makeSnapshot(0.0f, 16.0f / 9.0f, commands)));
+    device.endFrame();
+
+    const std::string sequence = sequenceString(device.commandBuffer.events);
+    CHECK(sequence ==
+          "begin;"
+          "pipe:nova.background;ubo:0@0;draw:nova.background:3;"
+          "pipe:nova.triangle;vbo:nova.triangle.vertices;ubo:0@256;draw:nova.triangle:3;"
+          "end");
+
+    // Exactly one rendering scope: background + one draw per command.
+    const auto& events = device.commandBuffer.events;
+    nova::core::u32 draws = 0;
+    for (const Event& event : events) {
+        if (event.kind == EventKind::Draw) ++draws;
+    }
+    CHECK(draws == 2);
+    CHECK(renderer.stats().drawCalls == 2);
+    CHECK(renderer.stats().droppedCommands == 0);
+    CHECK(device.endFrameCalls == 1);
+    CHECK(device.createdPipelines.size() == 2);
+}
+
+TEST_CASE("Renderer writes one UBO slice per draw command") {
+    MockDevice device;
+    renderer::Renderer renderer;
+    const auto spirv = fakeSpirv();
+    REQUIRE(renderer.init(device, spirv, spirv, spirv, spirv).isOk());
+
+    const std::vector<renderer::DrawCommand> commands = triangleCommands(3);
+    const float aspect = 2.0f;
+
+    rhi::FrameInfo frame{};
+    REQUIRE(device.beginFrame(frame));
+    REQUIRE(renderer.render(frame, makeSnapshot(1.5f, aspect, commands)));
+    device.endFrame();
+
+    const auto& events = device.commandBuffer.events;
+    nova::core::u32 draws = 0;
+    for (const Event& event : events) {
+        if (event.kind == EventKind::Draw) ++draws;
+    }
+    CHECK(draws == 4);  // background + 3 objects
+    CHECK(renderer.stats().drawCalls == 4);
+
+    // Slice 0 carries the camera block; slices 1..3 carry viewProjection*world.
+    const renderer::FrameUniforms* base = sliceAt(events, 0);
+    REQUIRE(base != nullptr);
+    CHECK(base->time == doctest::Approx(1.5f));
+    CHECK(base->aspect == doctest::Approx(aspect));
+
+    std::vector<nova::core::usize> uniformOffsets;
+    for (const Event& event : events) {
+        if (event.kind == EventKind::BindUniform) uniformOffsets.push_back(event.offset);
+    }
+    REQUIRE(uniformOffsets.size() == 4);
+    CHECK(uniformOffsets[0] == 0);
+
+    for (nova::core::usize index = 0; index < commands.size(); ++index) {
+        const renderer::FrameUniforms* slice = sliceAt(events, index + 1);
+        REQUIRE(slice != nullptr);
+        const math::Mat4 expected =
+            renderer::Renderer::viewProjection(aspect) * commands[index].world;
+        CHECK(slice->time == doctest::Approx(1.5f));
+        CHECK(slice->transform[3].x == doctest::Approx(expected[3].x).epsilon(1e-5));
+        CHECK(slice->transform[3].y == doctest::Approx(expected[3].y).epsilon(1e-5));
+        CHECK(slice->transform[0].x == doctest::Approx(expected[0].x).epsilon(1e-5));
+        // Offsets are 256-byte aligned, one slice per command.
+        CHECK(uniformOffsets[index + 1] ==
+              (index + 1) * renderer::Renderer::kUniformSliceBytes);
+    }
+}
+
+TEST_CASE("Renderer drops draw commands beyond the per-frame budget") {
+    MockDevice device;
+    renderer::Renderer renderer;
+    const auto spirv = fakeSpirv();
+    REQUIRE(renderer.init(device, spirv, spirv, spirv, spirv).isOk());
+
+    constexpr nova::core::usize kRequested = renderer::Renderer::kMaxDrawCommandsPerFrame + 8;
+    const std::vector<renderer::DrawCommand> commands = triangleCommands(kRequested);
+
+    rhi::FrameInfo frame{};
+    REQUIRE(device.beginFrame(frame));
+    REQUIRE(renderer.render(frame, makeSnapshot(0.0f, 1.0f, commands)));
+    device.endFrame();
+
+    CHECK(renderer.stats().drawCalls == renderer::Renderer::kMaxDrawCommandsPerFrame + 1);
+    CHECK(renderer.stats().droppedCommands == 8);
+
+    // Every recorded slice stays inside the frame UBO.
+    const auto& events = device.commandBuffer.events;
+    nova::core::usize maxOffset = 0;
+    for (const Event& event : events) {
+        if (event.kind == EventKind::BindUniform) maxOffset = std::max(maxOffset, event.offset);
+    }
+    CHECK(maxOffset == renderer::Renderer::kMaxDrawCommandsPerFrame *
+                           renderer::Renderer::kUniformSliceBytes);
+}
+
+TEST_CASE("Renderer skips draw commands naming an unknown mesh") {
+    MockDevice device;
+    renderer::Renderer renderer;
+    const auto spirv = fakeSpirv();
+    REQUIRE(renderer.init(device, spirv, spirv, spirv, spirv).isOk());
+
+    std::vector<renderer::DrawCommand> commands = triangleCommands(1);
+    renderer::DrawCommand empty{};  // BuiltinMesh::kNone
+    commands.push_back(empty);
+    commands.push_back(triangleCommands(1)[0]);
+
+    rhi::FrameInfo frame{};
+    REQUIRE(device.beginFrame(frame));
+    REQUIRE(renderer.render(frame, makeSnapshot(0.0f, 1.0f, commands)));
+    device.endFrame();
+
+    CHECK(renderer.stats().drawCalls == 3);  // background + 2 real meshes
+    CHECK(renderer.stats().droppedCommands == 1);
+}
+
+TEST_CASE("Renderer draws the background when the draw list is empty") {
     MockDevice device;
     renderer::Renderer renderer;
     const auto spirv = fakeSpirv();
@@ -270,25 +453,13 @@ TEST_CASE("Renderer records background then triangle in one rendering scope") {
 
     rhi::FrameInfo frame{};
     REQUIRE(device.beginFrame(frame));
-    CHECK(renderer.render(frame, 0.0f));
+    REQUIRE(renderer.render(frame, makeSnapshot(0.25f, 1.0f)));
     device.endFrame();
 
-    const std::string sequence = sequenceString(device.commandBuffer.events);
-    CHECK(sequence ==
-          "begin;"
-          "pipe:nova.background;ubo:0;draw:nova.background:3;"
-          "pipe:nova.triangle;vbo:nova.triangle.vertices;ubo:0;draw:nova.triangle:3;"
-          "end");
-
-    // Exactly one rendering scope and two draws per frame.
-    const auto& events = device.commandBuffer.events;
-    nova::core::u32 draws = 0;
-    for (const Event& event : events) {
-        if (event.kind == EventKind::Draw) ++draws;
-    }
-    CHECK(draws == 2);
-    CHECK(device.endFrameCalls == 1);
-    CHECK(device.createdPipelines.size() == 2);
+    CHECK(sequenceString(device.commandBuffer.events) ==
+          "begin;pipe:nova.background;ubo:0@0;draw:nova.background:3;end");
+    CHECK(renderer.stats().drawCalls == 1);
+    CHECK(renderer.stats().droppedCommands == 0);
 }
 
 TEST_CASE("Renderer alternates UBO ring slots and advances animation time") {
@@ -299,12 +470,12 @@ TEST_CASE("Renderer alternates UBO ring slots and advances animation time") {
 
     rhi::FrameInfo frame0{};
     REQUIRE(device.beginFrame(frame0));
-    REQUIRE(renderer.render(frame0, 1.0f));
+    REQUIRE(renderer.render(frame0, makeSnapshot(1.0f, 1.0f)));
     device.endFrame();
 
     rhi::FrameInfo frame1{};
     REQUIRE(device.beginFrame(frame1));
-    REQUIRE(renderer.render(frame1, 2.0f));
+    REQUIRE(renderer.render(frame1, makeSnapshot(2.0f, 1.0f)));
     device.endFrame();
 
     CHECK(frame0.ringIndex == 0);
@@ -315,7 +486,7 @@ TEST_CASE("Renderer alternates UBO ring slots and advances animation time") {
     // Grab them through a third render to observe slot 0 again.
     rhi::FrameInfo frame2{};
     REQUIRE(device.beginFrame(frame2));
-    REQUIRE(renderer.render(frame2, 3.0f));
+    REQUIRE(renderer.render(frame2, makeSnapshot(3.0f, 1.0f)));
     device.endFrame();
     CHECK(renderer.stats().frameSlot == 0);
 
@@ -331,14 +502,14 @@ TEST_CASE("Renderer recreates pipelines when the swapchain format changes") {
 
     rhi::FrameInfo frame{};
     REQUIRE(device.beginFrame(frame));
-    REQUIRE(renderer.render(frame, 0.0f));
+    REQUIRE(renderer.render(frame, makeSnapshot(0.0f, 1.0f)));
     device.endFrame();
     CHECK(device.createdPipelines.size() == 2);
 
     device.formatForNextFrame = Format::BGRA8_UNorm;
     rhi::FrameInfo frame2{};
     REQUIRE(device.beginFrame(frame2));
-    REQUIRE(renderer.render(frame2, 0.1f));
+    REQUIRE(renderer.render(frame2, makeSnapshot(0.1f, 1.0f)));
     device.endFrame();
     CHECK(device.createdPipelines.size() == 4);
     // Old pipelines were destroyed: live count is still exactly 2 pipelines

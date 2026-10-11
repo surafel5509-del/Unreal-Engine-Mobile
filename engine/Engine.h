@@ -4,7 +4,12 @@
 //
 // Owns every subsystem for the current process lifetime:
 //   VFS (APK + data mounts), logger file sink, console registry,
-//   the RHI device, the renderer, the input queue and frame statistics.
+//   the RHI device, the scene World + hierarchy, the renderer, the input queue
+//   and frame statistics.
+//
+// Per frame the engine runs the scene stage (animation of demo transforms ->
+// hierarchy evaluation -> frustum cull -> front-to-back sort -> draw list) and
+// hands the result to the renderer as a SceneSnapshot.
 //
 // Serialization: a single mutex covers all public calls. The JNI layer runs
 // control operations (init, surface, lifecycle, console) on the UI thread and
@@ -22,10 +27,17 @@
 #include "platform/InputQueue.h"
 #include "platform/VirtualFileSystem.h"
 #include "rhi/IDevice.h"
+#include "renderer/DrawList.h"
 #include "renderer/Renderer.h"
+#include "scene/Camera.h"
+#include "scene/Culling.h"
+#include "scene/SceneHierarchy.h"
+#include "scene/Transform.h"
+#include "scene/World.h"
 
 #include <mutex>
 #include <string>
+#include <vector>
 
 struct AAssetManager;
 
@@ -108,6 +120,16 @@ private:
     void registerConsoleCommands();
     bool loadShader(const char* path, std::vector<core::u32>& outWords);
 
+    /// Build the M2 demo scene: a camera entity and one drawable entity.
+    /// Idempotent — re-running after shutdown() recreates the entities.
+    void createDemoScene();
+
+    /// Scene stage for one frame: animate, evaluate the hierarchy, cull, order
+    /// and fill m_drawCommands. Writes the camera's view-projection and the
+    /// resulting draw list into `snapshot` (whose time/aspect the caller sets).
+    /// Returns false when the scene has no usable camera. Caller holds m_mutex.
+    bool updateScene(f32 width, f32 height, renderer::SceneSnapshot& snapshot);
+
     mutable std::mutex m_mutex;
     bool m_initialized = false;
     bool m_paused = false;
@@ -118,6 +140,15 @@ private:
 
     rhi::Unique<rhi::IDevice> m_device;
     renderer::Renderer m_renderer;
+
+    // scene (ECS) — owned here so the World outlives every per-frame view
+    scene::World m_world;
+    scene::SceneHierarchy m_hierarchy;
+    scene::Entity m_cameraEntity = scene::kNullEntity;
+    scene::Entity m_demoEntity = scene::kNullEntity;
+    std::vector<scene::Entity> m_visible;         // reused, never reallocated after warm-up
+    std::vector<renderer::DrawCommand> m_drawCommands;  // reused, see SceneSnapshot
+    scene::CullStats m_lastCull{};
 
     // frame bookkeeping
     core::Stopwatch m_uptime;

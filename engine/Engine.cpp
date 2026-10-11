@@ -11,7 +11,7 @@
 namespace nova {
 namespace {
 
-constexpr const char* kVersion = "0.1.0 (M1)";
+constexpr const char* kVersion = "0.2.0 (M2)";
 
 }  // namespace
 
@@ -93,6 +93,9 @@ Result<void, EngineError> Engine::init(const EngineConfig& config) {
         return Result<void, EngineError>::failure(EngineError::RendererInitFailed);
     }
 
+    // --- scene -------------------------------------------------------------
+    createDemoScene();
+
     registerConsoleCommands();
     m_initialized = true;
     m_paused = false;
@@ -111,6 +114,21 @@ void Engine::shutdownLocked() {
     } else {
         m_renderer.shutdown();
     }
+    // Scene teardown: drop the entities so a later init() starts from a clean
+    // World (generations bump, indices are recycled).
+    if (m_world.isAlive(m_demoEntity)) {
+        m_world.destroy(m_demoEntity);
+    }
+    if (m_world.isAlive(m_cameraEntity)) {
+        m_world.destroy(m_cameraEntity);
+    }
+    m_cameraEntity = scene::kNullEntity;
+    m_demoEntity = scene::kNullEntity;
+    m_hierarchy.reset();
+    m_visible.clear();
+    m_drawCommands.clear();
+    m_lastCull = scene::CullStats{};
+
     m_initialized = false;
     m_paused = false;
     m_frameCount = 0;
@@ -125,6 +143,78 @@ void Engine::shutdown() {
     NOVA_LOG_INFO("engine: shutting down (frames rendered: %llu)",
                   static_cast<unsigned long long>(m_frameCount));
     shutdownLocked();
+}
+
+void Engine::createDemoScene() {
+    // Idempotent: shutdownLocked() destroys the entities, so a re-init rebuilds
+    // them; a second call with a live camera is a no-op.
+    if (m_world.isAlive(m_cameraEntity) && m_world.has<scene::Camera>(m_cameraEntity)) {
+        return;
+    }
+
+    // Camera at (0, 0, 3) looking down -Z with up = +Y. That placement makes
+    // viewMatrix() equal the translation M1's lookAt() produced, so the on
+    // screen image is pixel-identical to the hard-coded renderer.
+    m_cameraEntity = m_world.create();
+    m_world.add<scene::Transform>(m_cameraEntity,
+                                  scene::Transform::fromPosition(math::Vec3(0.0f, 0.0f, 3.0f)));
+    scene::Camera camera{};
+    camera.projection = scene::ProjectionType::Perspective;
+    camera.fovYDegrees = 60.0f;
+    camera.nearPlane = 0.1f;
+    camera.farPlane = 100.0f;
+    camera.aspectRatio = 16.0f / 9.0f;  // overwritten from the swapchain per frame
+    m_world.add<scene::Camera>(m_cameraEntity, camera);
+
+    // The hero triangle: one drawable entity at the origin, spinning in place.
+    m_demoEntity = m_world.create();
+    m_world.add<scene::Transform>(m_demoEntity, scene::Transform{});
+    m_world.add<scene::Bounds>(m_demoEntity,
+                               scene::Bounds{math::Vec3(0.0f, 0.0f, 0.0f), math::Vec3(0.75f)});
+    renderer::MeshRef meshRef{};
+    meshRef.mesh = renderer::BuiltinMesh::kTriangle;
+    meshRef.tint = math::Vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    m_world.add<renderer::MeshRef>(m_demoEntity, meshRef);
+
+    m_hierarchy.reset();
+    m_visible.clear();
+    m_drawCommands.clear();
+    m_lastCull = scene::CullStats{};
+
+    NOVA_LOG_INFO("engine: demo scene created (entities=%u camera=%u.%u object=%u.%u)",
+                  static_cast<unsigned>(m_world.aliveCount()),
+                  static_cast<unsigned>(m_cameraEntity.index),
+                  static_cast<unsigned>(m_cameraEntity.generation),
+                  static_cast<unsigned>(m_demoEntity.index),
+                  static_cast<unsigned>(m_demoEntity.generation));
+}
+
+bool Engine::updateScene(f32 width, f32 height, renderer::SceneSnapshot& snapshot) {
+    // Caller holds m_mutex.
+    const f32 aspect = height > 0.0f ? width / height : 1.0f;
+
+    // Animate: the same slow tumble the M1 renderer baked into its UBO, now
+    // expressed as a Transform so the hierarchy owns the world matrix.
+    if (scene::Transform* transform = m_world.get<scene::Transform>(m_demoEntity)) {
+        transform->rotation =
+            math::quatRotationY(m_engineTime * 0.9f) * math::quatRotationZ(m_engineTime * 0.55f);
+    }
+
+    renderer::SceneStageInput stageInput{};
+    stageInput.world = &m_world;
+    stageInput.hierarchy = &m_hierarchy;
+    stageInput.cameraEntity = m_cameraEntity;
+    stageInput.timeSeconds = m_engineTime;
+    stageInput.aspect = aspect;
+
+    renderer::SceneStageOutput stageOutput{};
+    if (!renderer::runSceneStage(stageInput, m_visible, m_drawCommands, snapshot, &stageOutput)) {
+        m_lastCull = scene::CullStats{};
+        return false;
+    }
+
+    m_lastCull = stageOutput.cull;
+    return true;
 }
 
 bool Engine::loadShader(const char* path, std::vector<core::u32>& outWords) {
@@ -195,7 +285,22 @@ int Engine::frame(float dtSeconds) {
     }
 
     m_engineTime += dt;
-    if (!m_renderer.render(frameInfo, m_engineTime)) {
+
+    // Scene stage: animate -> hierarchy -> cull -> sort -> draw list. It runs
+    // after beginFrame() because the camera's aspect ratio comes from the
+    // swapchain extent of the frame we are about to record.
+    renderer::SceneSnapshot snapshot{};
+    snapshot.timeSeconds = m_engineTime;
+    snapshot.aspect = frameInfo.height > 0
+                          ? static_cast<f32>(frameInfo.width) / static_cast<f32>(frameInfo.height)
+                          : 1.0f;
+    if (!updateScene(static_cast<f32>(frameInfo.width), static_cast<f32>(frameInfo.height),
+                     snapshot)) {
+        m_device->endFrame();
+        return kFrameSkipped;
+    }
+
+    if (!m_renderer.render(frameInfo, snapshot)) {
         // Pipeline creation failed for this format; keep the frame open so
         // endFrame() stays paired with beginFrame().
         m_device->endFrame();
@@ -307,6 +412,20 @@ void Engine::registerConsoleCommands() {
             out << "input_pending=" << m_input.pendingCount()
                 << " input_dropped=" << m_input.droppedCount()
                 << " log_records=" << core::log::retainedCount() << "\n";
+            const scene::World::Stats& worldStats = m_world.stats();
+            out << "entities=" << worldStats.aliveEntities << "/" << worldStats.entitySlots
+                << " components=" << worldStats.components
+                << " types=" << worldStats.componentTypes
+                << " ecs_bytes=" << worldStats.memoryBytes << "\n";
+            out << "draw_commands=" << m_drawCommands.size()
+                << " visible=" << m_lastCull.visible << " culled=" << m_lastCull.culled
+                << " unbounded=" << m_lastCull.unbounded
+                << " candidates=" << m_lastCull.candidates << "\n";
+            const renderer::RenderStats& renderStats = m_renderer.stats();
+            out << "draw_calls=" << renderStats.drawCalls
+                << " dropped_commands=" << renderStats.droppedCommands
+                << " pipelines=" << renderStats.pipelines
+                << " frame_slot=" << renderStats.frameSlot << "\n";
             return out.str();
         });
 

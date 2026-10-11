@@ -52,38 +52,46 @@ Naming, ownership, and documentation rules are in
 ┌──────────────────────────▼─────────────────────────────────────────┐
 │ nova::Engine                       engine/Engine.h/.cpp            │
 │   facade: init · shutdown · frame · setSurface · input · console   │
-│   owns: device, renderer, VFS, input queue, clock, console (mutex) │
+│   owns: device, renderer, World + hierarchy, VFS, input, clock     │
 └───────┬───────────────┬──────────────────────┬─────────────────────┘
         │               │                      │
 ┌───────▼──────┐ ┌──────▼───────────┐ ┌────────▼──────────┐
 │ renderer     │ │ platform         │ │ core              │
 │ Renderer     │ │ InputQueue       │ │ Types · Result    │
-│ (M1 passes)  │ │ VirtualFileSystem│ │ Assert · Log      │
-└───────┬──────┘ └──────────────────┘ │ Console · Memory  │
-        │                             │ Math · Time       │
-┌───────▼──────────────────────┐      └───────────────────┘
-│ rhi                          │              ▲
-│ IDevice · ICommandBuffer     │──────────────┘ (depends on core only)
-│ RhiTypes · RhiResources      │
-│ DeviceFactory                │
-│  ├─ vulkan/ (M1, enabled)    │
-│  └─ gles/   (post-M1)        │
-└──────────────────────────────┘
+│ DrawList     │ │ VirtualFileSystem│ │ Assert · Log      │
+└───┬───────┬──┘ └──────────────────┘ │ Console · Memory  │
+    │       │                         │ Math · Time       │
+    │   ┌───▼──────────────────────┐  └───────────────────┘
+    │   │ scene                    │              ▲
+    │   │ Entity · World · View    │──────────────┘ (depends on core only)
+    │   │ Transform · SceneHierarchy│
+    │   │ Camera · Frustum · Culling│
+    │   └──────────────────────────┘
+┌───▼──────────────────────┐
+│ rhi                      │
+│ IDevice · ICommandBuffer │
+│ RhiTypes · RhiResources  │
+│ DeviceFactory            │
+│  ├─ vulkan/ (M1, enabled)│
+│  └─ gles/   (post-M1)    │
+└──────────────────────────┘
 ```
 
 Dependency rule: arrows point downward only. `core` depends on nothing inside
 the engine (GLM and the standard library are its only externals); `rhi` depends
-on `core`; `renderer` depends on `rhi` + `core`; `platform` depends on `core`;
-`Engine` composes all of them. Nothing in `core`/`platform`/`renderer` includes
-a Vulkan header — only `rhi/vulkan/` does, which is what makes the mock-RHI
-tests possible.
+on `core`; `scene` depends on `core`; `renderer` depends on `rhi` + `scene` +
+`core` (the draw list reads the World, never the reverse); `platform` depends on
+`core`; `Engine` composes all of them. Nothing in
+`core`/`platform`/`scene`/`renderer` includes a Vulkan header — only
+`rhi/vulkan/` does, which is what makes the mock-RHI tests possible.
 
 `engine/scene` holds the M2 ECS (entity handles, sparse-set component storage,
-`World`, `View`) and the transform hierarchy (`Transform`/`Parent`/
+`World`, `View`), the transform hierarchy (`Transform`/`Parent`/
 `WorldTransform` components evaluated by `SceneHierarchy`), and camera/culling
-(`Camera`, `Frustum`, `Bounds`, `cullForCamera`, `sortFrontToBack`); it depends
-on `core` only, and `Engine` will own the world once the scene-driven pass list
-replaces the hard-coded M1 passes. The
+(`Camera`, `Frustum`, `Bounds`, `cullForCamera`, `sortFrontToBack`). `Engine`
+owns the `World` and runs the scene stage each frame; `renderer/DrawList.h`
+defines the one component the renderer needs (`MeshRef`) plus the
+`DrawCommand`/`SceneSnapshot` contract the two layers exchange. The
 remaining module directories (`engine/assets`, `engine/physics`, …) are
 placeholders for later milestones; each has a README stating what lands there
 and which CMake flag enables it.
@@ -195,11 +203,22 @@ Engine::frame(dtSeconds)                      [render thread, holds m_mutex]
  │    ├─ apply pending surface size → recreate swapchain if dirty
  │    ├─ vkAcquireNextImageKHR (3 retries on OUT_OF_DATE)
  │    └─ wait on imagesInFlight[image] if that image is still queued
- ├─ Renderer::render(frame, timeSeconds)
+ ├─ Engine::updateScene(width, height, SceneSnapshot&)   ← scene stage
+ │    ├─ animate demo Transform (rotation = quatY(t·0.9) · quatZ(t·0.55))
+ │    └─ renderer::runSceneStage(input, visible, commands, snapshot, &stats)
+ │         ├─ camera.aspectRatio = width / height
+ │         ├─ SceneHierarchy::update(world)   → WorldTransform for every entity
+ │         ├─ cullForCamera(world, camera, visible, cullStats)  ← frustum test
+ │         ├─ sortFrontToBack(world, cameraPosition, visible)
+ │         ├─ buildDrawCommands(world, visible, commands)
+ │         └─ snapshot = {viewProjection, time, aspect, span(commands)}
+ │       (false → endFrame() + kFrameSkipped, nothing recorded)
+ ├─ Renderer::render(frame, snapshot)
  │    ├─ ensurePipelines(frame.colorFormat)   ← lazy; rebuild on format change
+ │    ├─ write UBO slice 0 (camera block) + slice i+1 per draw command
  │    ├─ commands->begin()                    ← dynamic rendering begins
- │    ├─ pass 1 "nova.background": bind UBO slot 0, draw 3 (full-screen tri)
- │    ├─ pass 2 "nova.triangle":   bind VBO, bind UBO slot 0, draw 3
+ │    ├─ pass 1 "nova.background": bind UBO slice 0, draw 3 (full-screen tri)
+ │    ├─ pass 2..N: one pass per DrawCommand — bind pipeline + VBO + UBO slice
  │    └─ commands->end()
  ├─ device->endFrame()
  │    ├─ vkQueueSubmit2 (synchronization2: one submit info, stage masks)
@@ -345,23 +364,29 @@ Frame ring (`kMaxFramesInFlight = 2`): per-frame command pool, command buffer,
 fence, and `imagesInFlight` semaphore tracking; acquire → record → `vkQueueSubmit2`
 → present, with the fence waited at the *start* of the frame that reuses the slot.
 
-Descriptor management: one `VkDescriptorSetLayout` (`set = 0`, single dynamic
-UBO binding, `VERTEX|FRAGMENT` stage flags), a pool sized
-`kDescriptorSetsPerFrame = 64` per frame, and `vkUpdateDescriptorSets` writing
-the dynamic offset each frame — no per-frame allocation.
+Descriptor management: one `VkDescriptorSetLayout` (`set = 0`, single
+**non-dynamic** UBO binding, `VERTEX|FRAGMENT` stage flags) and a pool sized
+`kDescriptorSetsPerFrame = 64` per frame. `bindUniformBuffer(slot, buffer,
+offset, range)` allocates a fresh set from that pool, writes the buffer/offset
+with `vkUpdateDescriptorSets` and binds it — so per-object UBO slices need no
+shader change and no dynamic-offset support. The pool resets with the frame
+ring; a frame may therefore bind at most 64 uniform slices, which is why the
+renderer caps its draw list at `kMaxDrawCommandsPerFrame = 32` (33 binds with
+the background pass).
 
 ---
 
-## 8. Renderer (M1)
+## 8. Renderer (M2)
 
-`engine/renderer/Renderer.h/.cpp` — two passes, no scene graph yet.
+`engine/renderer/Renderer.h/.cpp` records a frame from a `SceneSnapshot`;
+`engine/renderer/DrawList.h/.cpp` is the scene→renderer contract.
 
 **Uniform block** (128 bytes, `std140`, `set = 0, binding = 0`, identical in
-GLSL and C++, `static_assert(sizeof(FrameUBO) == 128)`):
+GLSL and C++, `static_assert(sizeof(FrameUniforms) == 128)`):
 
 ```cpp
-struct FrameUBO {              // GLSL: layout(std140, binding = 0) uniform FrameUBO
-    math::Mat4 viewProjection; //  0..63
+struct FrameUniforms {         // GLSL: layout(std140, binding = 0) uniform FrameUBO
+    math::Mat4 transform;      //  0..63   clip = transform * position
     math::Vec4 colorA;         // 64..79   gradient top
     math::Vec4 colorB;         // 80..95   gradient bottom
     math::Vec4 accent;         // 96..111  triangle tint / highlight
@@ -371,28 +396,59 @@ struct FrameUBO {              // GLSL: layout(std140, binding = 0) uniform Fram
 };
 ```
 
+**Per-object slicing.** Each frame slot owns one persistently mapped buffer of
+`(kMaxDrawCommandsPerFrame + 1) · kUniformSliceBytes` = `33 · 256` = 8 448
+bytes. Slice 0 holds the camera block (`transform = viewProjection`); slice
+`i + 1` holds draw command *i* (`transform = viewProjection · world`, palette
+and `time`/`aspect` copied from slice 0). 256 bytes satisfies every Vulkan
+`minUniformBufferOffsetAlignment` (16/64/256) and lets each object bind its own
+descriptor set at a plain offset — no dynamic offsets, no shader or SPIR-V
+change from the M1 layout. Overflow beyond 32 commands is dropped and counted in
+`RenderStats::droppedCommands` (logged once per frame).
+
+**Draw list** (`renderer/DrawList.h`): `MeshRef{BuiltinMesh mesh, Vec4 tint}` is
+the component that marks an entity drawable; `buildDrawCommands(world, visible,
+out)` appends one `DrawCommand{mesh, world, tint}` per entity that owns both a
+`MeshRef` and a `WorldTransform`, preserving the caller's order (so the scene
+stage controls draw order via `sortFrontToBack`). `SceneSnapshot` bundles the
+view-projection, `timeSeconds`, `aspect` and a `std::span` of the commands; the
+span is non-owning and `Engine` reuses one vector across frames, keeping the
+frame loop allocation-free.
+
+**Scene stage** (`renderer::runSceneStage`): the per-frame pass — aspect into
+the `Camera`, `SceneHierarchy::update`, `cullForCamera`, `sortFrontToBack`,
+`buildDrawCommands`, snapshot fill — as one free function instead of code inside
+`Engine::frame`. That is deliberate: `Engine::init()` needs a real Vulkan device,
+so a scene stage buried in `Engine` could only be compile-checked on the host,
+whereas `runSceneStage` is covered by 5 dedicated doctest cases (contents,
+hierarchy re-evaluation, vector reuse, and both failure paths). It fails closed:
+empty draw list, identity view-projection, `false`, and `Engine` skips the frame.
+
 **Pass 1 — `nova.background`:** a full-screen triangle generated in the vertex
 shader from `gl_VertexIndex` (3 vertices, no buffer bound), UVs computed from
 the oversized triangle, fragment shader mixes `colorA → colorB` vertically with
-a slow time-based hue shift and a subtle vignette.
+a slow time-based hue shift and a subtle vignette. Reads slice 0.
 
-**Pass 2 — `nova.triangle`:** 3 interleaved vertices
+**Pass 2..N — one pass per draw command:** 3 interleaved vertices
 (`position vec3` @ location 0, `color vec3` @ location 1, stride 24) in a
 host-visible buffer; Y-up coordinates, top vertex violet `#7C4DFF`, bottom-left
-cyan `#00E5FF`, bottom-right pink `#FF4D8D`. Rotation is applied on the CPU into
-`viewProjection` (Z-axis spin), and the projection is
-`math::perspectiveVk` — Vulkan clip space: Y flipped relative to GL, depth
-`[0, 1]`, 60° vertical FOV, camera at `+Z` looking at the origin.
+cyan `#00E5FF`, bottom-right pink `#FF4D8D`. The object's world matrix comes
+from the ECS hierarchy and its tumble from `Engine::updateScene`
+(`rotation = quatRotationY(t·0.9) · quatRotationZ(t·0.55)`), which reproduces
+the M1 image exactly — `test_drawlist.cpp` pins both the camera matrix and the
+tumble against `Renderer::viewProjection(aspect)`, the reference
+`perspectiveVk(60°) · lookAt((0,0,3), origin, +Y)`.
 
 Pipeline state: `frontFace = CLOCKWISE`, `cullMode = BACK`, no depth attachment
-(M1 draws back-to-front with no depth test), dynamic rendering formats from
-`FrameInfo::colorFormat`. Pipelines are created lazily on first use and
-**rebuilt only when the color format changes** — the mock test asserts the
-pipeline count goes 2 → 4 across a format change while live resource tracking
-stays consistent.
+(opaque draws are ordered front-to-back by the scene stage, so no depth test is
+needed), dynamic rendering formats from `FrameInfo::colorFormat`. Pipelines are
+created lazily on first use and **rebuilt only when the color format changes** —
+the mock test asserts the pipeline count goes 2 → 4 across a format change while
+live resource tracking stays consistent.
 
-`RenderStats` (draw calls, pipeline rebuilds, UBO bytes written) is exposed for
-the `stats` console command.
+`RenderStats` (draw calls, pipeline count, frame slot, dropped commands) is
+exposed for the `stats` console command, which also prints World/hierarchy and
+culling counters.
 
 ---
 
@@ -555,17 +611,19 @@ root `build.gradle.kts` (AGP 8.5.2, Kotlin 1.9.24), `app/build.gradle.kts`
 | On-device | Visual + logcat verification of the demo | manual / M9 tooling |
 
 The mock RHI is the key trick: `MockDevice` implements `IDevice` and appends
-tokens (`begin`, `pipe:<name>`, `ubo:<slot>`, `vbo:<name>`, `draw:<name>:<count>`,
-`end`) to a transcript. Tests then assert the **exact** recorded sequence for a
-frame, the UBO ring alternation across frames, pipeline rebuild counts on format
-change, live-resource accounting after init/shutdown, and that a failed
-`createShaderModule` rolls the renderer back to a clean state. That gives
-renderer-behaviour coverage with no GPU, no device, and no Vulkan loader.
+tokens (`begin`, `pipe:<name>`, `ubo:<slot>@<offset>`, `vbo:<name>`,
+`draw:<name>:<count>`, `end`) to a transcript. Tests then assert the **exact**
+recorded sequence for a frame, the UBO slice offset of every draw, the written
+uniform contents per slice, the UBO ring alternation across frames, pipeline
+rebuild counts on format change, live-resource accounting after init/shutdown,
+and that a failed `createShaderModule` rolls the renderer back to a clean state.
+That gives renderer-behaviour coverage with no GPU, no device, and no Vulkan
+loader.
 
-Current totals: **92 test cases, 51 261 assertions** (M0/M1 suites plus the M2
-ECS, transform-hierarchy and culling suites), passing in both the plain host
-build and the host-check build, with zero first-party compiler warnings under
-`-Wall -Wextra -Wshadow`.
+Current totals: **111 test cases, 51 448 assertions** (M0/M1 suites plus the M2
+ECS, transform-hierarchy, culling and draw-list suites), passing in both the
+plain host build and the host-check build, with zero first-party compiler
+warnings under `-Wall -Wextra -Wshadow`.
 
 ---
 
@@ -597,7 +655,7 @@ Rules the M0/M1 code already follows, and that later milestones must keep:
 
 | Milestone | Attaches here |
 | --- | --- |
-| M2 ECS + scene | `engine/scene/` (`nova::scene`) — **ECS core landed**: `Entity`, `SparseSet`/`ComponentStorage<T>`, `World`, `View<Ts...>`. **Transform hierarchy landed**: `Transform`/`Parent`/`WorldTransform` components plus `SceneHierarchy` (CSR child lists, level-order evaluation, cycle/orphan reporting). **Cameras + culling landed**: `Camera` (perspective/orthographic, Vulkan clip space), `Frustum` (Gribb-Hartmann extraction for `[0,1]` depth), `Bounds`, `cullForCamera`, `sortFrontToBack`. Remaining: the scene-driven pass list that lets `Renderer` iterate a world instead of drawing two hard-coded passes, plus the frame graph |
+| M2 ECS + scene | `engine/scene/` (`nova::scene`) — **ECS core landed**: `Entity`, `SparseSet`/`ComponentStorage<T>`, `World`, `View<Ts...>`. **Transform hierarchy landed**: `Transform`/`Parent`/`WorldTransform` components plus `SceneHierarchy` (CSR child lists, level-order evaluation, cycle/orphan reporting). **Cameras + culling landed**: `Camera` (perspective/orthographic, Vulkan clip space), `Frustum` (Gribb-Hartmann extraction for `[0,1]` depth), `Bounds`, `cullForCamera`, `sortFrontToBack`. **Scene-driven draw list landed**: `renderer/DrawList.h` (`MeshRef`, `DrawCommand`, `SceneSnapshot`, `buildDrawCommands`) — `Engine` owns the `World` and `Renderer::render` iterates the draw list instead of two hard-coded passes. Remaining: the frame graph, glTF/PBR assets and the GLES backend |
 | M2 frame graph | Between `Engine::frame` and `Renderer::render`: a pass graph that allocates transient attachments through `IDevice` |
 | M2 glTF/PBR | `engine/assets/` loaders → `rhi` buffers/textures; new pipelines registered by name |
 | M2 GLES backend | `engine/rhi/gles/` implementing `IDevice`; `DeviceFactory` picks it when Vulkan 1.3 is unavailable |

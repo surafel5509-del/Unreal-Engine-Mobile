@@ -1,15 +1,21 @@
 #pragma once
 
-// Nova Engine — M1 renderer: gradient background + rotating triangle.
+// Nova Engine — renderer: gradient background pass + scene-driven draw list.
 //
-// Responsibilities of this milestone's renderer:
+// Responsibilities:
 //  * own the frame UBO ring (one persistently mapped buffer per frame slot),
 //  * own the triangle vertex buffer and the two pipelines (background is a
 //    vertex-less fullscreen triangle; the hero triangle has a real layout),
 //  * lazily (re)create pipelines when the swapchain format is first known or
 //    changes (dynamic rendering bakes formats into the PSO),
-//  * record the frame: background pass then triangle pass in one
-//    dynamic-rendering scope.
+//  * record the frame from a SceneSnapshot: background pass, then one pass per
+//    draw command, all inside a single dynamic-rendering scope.
+//
+// The renderer owns no scene state. Per-object data lives in a 256-byte-aligned
+// slice of the frame UBO (slice 0 = camera/background constants, slice i + 1 =
+// draw command i), so each object gets its own descriptor set — no shader or
+// SPIR-V changes were needed to move from a single hard-coded triangle to an
+// arbitrary draw list.
 //
 // Threading: render() runs on the render thread under nova::Engine's frame
 // mutex; init()/shutdown() run during engine init/teardown (no overlap).
@@ -17,6 +23,7 @@
 #include "core/Math.h"
 #include "core/Result.h"
 #include "core/Types.h"
+#include "renderer/DrawList.h"
 #include "rhi/IDevice.h"
 
 #include <array>
@@ -54,6 +61,8 @@ struct RenderStats {
     u32 drawCalls = 0;
     u32 pipelines = 0;
     u32 frameSlot = 0;
+    /// Draw commands dropped this frame because the UBO slice budget ran out.
+    u32 droppedCommands = 0;
 };
 
 class Renderer : public nova::core::NonCopyable {
@@ -71,19 +80,33 @@ public:
     /// Release all device resources. Must run before the device is destroyed.
     void shutdown();
 
-    /// Record + submit nothing itself: fills `frame`'s command buffer.
+    /// Record the frame described by `snapshot` into `frame`'s command buffer.
     /// Returns false when pipelines could not be created for this format.
-    bool render(rhi::FrameInfo& frame, float timeSeconds);
+    bool render(rhi::FrameInfo& frame, const SceneSnapshot& snapshot);
 
     bool isInitialized() const { return m_device != nullptr; }
     const RenderStats& stats() const { return m_stats; }
 
-    /// Initial view-projection (exposed for tests): Vulkan clip space,
-    /// 60° vertical FOV, camera at +Z looking at the origin.
+    /// Bytes per object slice in the frame UBO. 256 covers every Vulkan
+    /// minUniformBufferOffsetAlignment (16/64/256) and gives each draw command
+    /// its own descriptor set without dynamic offsets.
+    static constexpr nova::core::usize kUniformSliceBytes = 256;
+
+    /// Draw commands per frame beyond which the frame budget is exceeded and
+    /// the overflow is dropped (counted in RenderStats::droppedCommands).
+    /// Slice 0 is the camera/background block, hence the + 1.
+    static constexpr u32 kMaxDrawCommandsPerFrame = 32;
+
+    /// Initial view-projection (exposed for tests and as the reference camera):
+    /// Vulkan clip space, 60° vertical FOV, camera at +Z looking at the origin.
     static math::Mat4 viewProjection(float aspect);
 
 private:
     bool ensurePipelines(rhi::Format colorFormat);
+
+    /// GPU resources for a builtin mesh, or nullptr when unsupported.
+    rhi::IPipeline* pipelineFor(BuiltinMesh mesh) const;
+    static u32 vertexCountFor(BuiltinMesh mesh);
 
     rhi::IDevice* m_device = nullptr;
 
