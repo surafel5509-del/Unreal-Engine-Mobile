@@ -50,10 +50,22 @@ inline Mat4 perspectiveVk(float fovYRadians, float aspect, float zNear, float zF
     return proj;
 }
 
+/// Right-handed orthographic projection with Vulkan depth range [0, 1] and the
+/// Y axis flipped, matching perspectiveVk.
+inline Mat4 orthographicVk(float left, float right, float bottom, float top, float zNear,
+                          float zFar) {
+    Mat4 proj = glm::ortho(left, right, bottom, top, zNear, zFar);
+    proj[1][1] = -proj[1][1];
+    return proj;
+}
+
 /// Right-handed look-at view matrix (Y-up world).
 inline Mat4 lookAt(const Vec3& eye, const Vec3& center, const Vec3& up) {
     return glm::lookAt(eye, center, up);
 }
+
+/// Inverse of a world matrix — the view matrix of a camera placed by it.
+inline Mat4 inverse(const Mat4& matrix) { return glm::inverse(matrix); }
 
 /// Uniform scale.
 inline Mat4 scale(const Vec3& s) { return glm::scale(Mat4(1.0f), s); }

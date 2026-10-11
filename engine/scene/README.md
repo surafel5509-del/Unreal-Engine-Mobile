@@ -6,7 +6,7 @@ Scene representation: entity/component storage, transform hierarchy, cameras,
 culling. Replaces the hard-coded two-pass loop in `engine/renderer` with a
 data-driven pass list.
 
-## What is here now (M2, first increment)
+## What is here now (M2)
 
 | File | Contents |
 | --- | --- |
@@ -16,6 +16,9 @@ data-driven pass list.
 | `View.h` | `View<Ts...>` intersection iteration over the smallest matching storage; iterators yield `std::tuple<Entity, Ts&...>` (structured bindings, in-place mutation); `each()`, `collectEntities()`, `size()` |
 | `Transform.h` | `Transform` (local T·R·S, `localMatrix()`), `Parent` (null handle == root), `WorldTransform` (cached world matrix) — all trivially copyable |
 | `SceneHierarchy.h` / `.cpp` | `setParent`/`detach` (rejects dead handles, self-parenting, cycles), `isAncestorOf`, `depthOf`, `childrenOf`, and `update()` which derives CSR child lists from `Parent` components and evaluates them level-order into `WorldTransform` |
+| `Camera.h` | `Camera` component (perspective/orthographic intrinsics, `priority`), `projectionMatrix()` / `viewMatrix()` / `viewProjectionMatrix()` in Vulkan clip space; placement comes from the entity's `WorldTransform`, so cameras can be parented |
+| `Frustum.h` / `.cpp` | Gribb-Hartmann plane extraction for Vulkan's `[0, 1]` clip depth, normalized inward normals, `contains()` / `intersectsSphere()` / `intersectsAabb()` (conservative toward keeping geometry) |
+| `Culling.h` / `.cpp` | `Bounds` component, `worldBounds()` (world AABB expanded by the absolute basis), `cullFrustum()`, `cullForCamera()` (excludes the camera itself), `sortFrontToBack()`, `CullStats` diagnostics |
 
 ```cpp
 #include "scene/View.h"
@@ -69,18 +72,44 @@ const auto& stats = hierarchy.lastStats();  // roots / written / orphans / cycli
 * CSR scratch buffers (`counts`/`offsets`/`indices`/levels) are reused across
   frames; `reset()` releases them.
 
+Culling semantics worth knowing:
+
+```cpp
+nova::scene::CullStats stats;
+std::vector<Entity> visible;
+if (nova::scene::cullForCamera(world, cameraEntity, visible, stats)) {
+    nova::scene::sortFrontToBack(world, cameraEye, visible);   // opaque draw list
+}
+```
+
+* Entities **without** `Bounds` are kept and counted in `CullStats::unbounded` —
+  an unknown extent is not a reason to drop something (lights, cameras and
+  logical nodes live here).
+* The camera entity is excluded from its own draw list.
+* Sphere/AABB tests are conservative in the *keep* direction, so culling can
+  retain a little extra geometry but never drops something visible.
+* `sortFrontToBack` uses `std::sort` (no temporary buffer) and is therefore not
+  stable; transparent lists need an explicit key and back-to-front ordering,
+  which the frame graph will own.
+
 Tests: `engine/tests/test_ecs.cpp` (20 cases — handle semantics, sparse-set
 behaviour, non-trivial component moves, purge-on-destroy, view
-intersection/mutation/empty-storage paths, 10 000-entity churn) and
+intersection/mutation/empty-storage paths, 10 000-entity churn),
 `engine/tests/test_transform.cpp` (16 cases — matrix composition, parenting and
 detach, cycle rejection, translation/rotation/scale inheritance, orphans,
-direct cycles, deep chain, wide hierarchy).
+direct cycles, deep chain, wide hierarchy) and
+`engine/tests/test_culling.cpp` (14 cases — projection conventions, view-matrix
+inversion, frustum plane extraction and point/sphere/AABB tests, world AABB
+derivation, camera exclusion and failure paths, orthographic volumes, parented
+cameras, front-to-back ordering, 4 000-object scene).
 
 ## Still planned for M2
 
-* Camera components (perspective/orthographic) producing view-projection matrices
-* Frustum culling and draw-list generation
-* Pass list consumed by `renderer::Renderer` (frame graph)
+* Pass list consumed by `renderer::Renderer`, so the renderer iterates a culled
+  world instead of drawing two hard-coded passes
+* Frame graph: passes declare reads/writes; transient attachments and barriers
+* `Engine` owns the `World` + `SceneHierarchy` and drives them from `frame()`;
+  the `stats` console command reports `World::Stats` and `CullStats`
 
 ## Rules for new code here
 

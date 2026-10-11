@@ -8,7 +8,7 @@ met **and** its code is covered by the host test/compile-check suite.
 | --- | --- | --- | --- |
 | M0 | Project skeleton | Gradle + NDK + CMake, JNI bridge, module layout, host build, test harness | ✅ complete |
 | M1 | Vulkan renderer | Vulkan 1.3 RHI, swapchain, dynamic rendering, M1 demo scene | ✅ complete |
-| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | 🔄 in progress (ECS + transform hierarchy landed) |
+| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | 🔄 in progress (ECS, transform hierarchy, cameras + culling landed) |
 | M3 | Asset pipeline | Cooking, streaming, ASTC/KTX2 textures, asset cache | ⬜ planned |
 | M4 | Rendering features | Shadows, IBL, HDR, post-processing, MSAA/TAA | ⬜ planned |
 | M5 | Physics | Jolt integration, collision shapes, raycasts, character controller | ⬜ planned |
@@ -120,10 +120,30 @@ three-level accumulation, idempotent re-update, Transform-less entities,
 orphans, direct cycles, self-parenting, a 1 000-deep chain and an 8 192-entity
 wide hierarchy).
 
+✅ **Cameras + frustum culling** — `engine/scene/`:
+
+| Piece | File | Notes |
+| --- | --- | --- |
+| Camera | `Camera.h` | Intrinsic parameters only (perspective FOV / orthographic half-height, aspect, near/far, priority); placement comes from the entity's `WorldTransform`, so cameras inherit the scene graph. `projectionMatrix` / `viewMatrix` / `viewProjectionMatrix` follow the Vulkan conventions from `core/Math.h` (Y flip, `[0,1]` depth); added `math::orthographicVk` and `math::inverse` |
+| Frustum | `Frustum.h` / `.cpp` | Gribb-Hartmann plane extraction adapted to Vulkan's `[0,1]` clip depth (near = `row2`, not the classic `[-1,1]` form `row3 + row2`), normalized inward normals, point/sphere/AABB tests conservative toward keeping geometry |
+| Culling | `Culling.h` / `.cpp` | `Bounds` component, `worldBounds()` (world AABB expanded by the absolute basis, so rotation and scale are handled), `cullFrustum()`, `cullForCamera()` (excludes the camera from its own list), `sortFrontToBack()` (allocation-free `std::sort`), `CullStats` diagnostics |
+
+Entities without `Bounds` are kept and reported as `unbounded` rather than
+dropped — an unknown extent is not a reason to discard a light, a camera or a
+logical node.
+
+Covered by `engine/tests/test_culling.cpp` (14 cases: projection conventions and
+clip-space corners, view-matrix inversion, plane extraction with true
+world-space near distances, sphere/AABB conservativeness, world AABB derivation
+under translation and rotation, camera exclusion, non-camera failure paths,
+orthographic volumes, parented cameras driven through `SceneHierarchy`,
+front-to-back ordering, and a 4 000-object scene whose expectations are derived
+from the depth slab rather than hard-coded counts).
+
 ### Remaining acceptance criteria
 
-* `engine/scene/`: camera components, per-frame frustum culling and draw-list
-  generation.
+* `engine/scene/`: the pass list that lets `Renderer` iterate a culled world
+  instead of drawing two hard-coded passes.
 * `engine/assets/`: glTF 2.0 (binary + JSON) loader → meshes/materials/textures
   through the RHI; KTX2/ASTC decode path stubbed for M3.
 * PBR pipeline: metallic-roughness BRDF, IBL-ready (full IBL in M4), depth

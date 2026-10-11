@@ -11,6 +11,7 @@ add_executable(nova_tests
     test_renderer.cpp
     test_ecs.cpp
     test_transform.cpp
+    test_culling.cpp
 )
 
 target_include_directories(nova_tests SYSTEM PRIVATE
