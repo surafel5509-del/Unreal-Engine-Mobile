@@ -58,10 +58,19 @@ inline Mat4 lookAt(const Vec3& eye, const Vec3& center, const Vec3& up) {
 /// Uniform scale.
 inline Mat4 scale(const Vec3& s) { return glm::scale(Mat4(1.0f), s); }
 
+/// Pure translation.
+inline Mat4 translation(const Vec3& t) { return glm::translate(Mat4(1.0f), t); }
+
 /// Quaternion helpers (blend trees in milestone M6 build on these).
 inline Quat quatRotationX(float radians) { return glm::angleAxis(radians, Vec3(1, 0, 0)); }
 inline Quat quatRotationY(float radians) { return glm::angleAxis(radians, Vec3(0, 1, 0)); }
 inline Quat quatRotationZ(float radians) { return glm::angleAxis(radians, Vec3(0, 0, 1)); }
 inline Mat4 quatToMat4(const Quat& q) { return glm::mat4_cast(q); }
+
+/// Translation * rotation * scale — the standard local-transform composition
+/// used by nova::scene::Transform::localMatrix().
+inline Mat4 composeTRS(const Vec3& t, const Quat& r, const Vec3& s) {
+    return translation(t) * quatToMat4(r) * scale(s);
+}
 
 }  // namespace nova::math

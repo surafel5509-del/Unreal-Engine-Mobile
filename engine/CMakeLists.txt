@@ -28,6 +28,7 @@ set(NOVA_RENDERER_SOURCES
 
 set(NOVA_SCENE_SOURCES
     scene/World.cpp
+    scene/SceneHierarchy.cpp
 )
 
 set(NOVA_ENGINE_SOURCES

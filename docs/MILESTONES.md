@@ -8,7 +8,7 @@ met **and** its code is covered by the host test/compile-check suite.
 | --- | --- | --- | --- |
 | M0 | Project skeleton | Gradle + NDK + CMake, JNI bridge, module layout, host build, test harness | ✅ complete |
 | M1 | Vulkan renderer | Vulkan 1.3 RHI, swapchain, dynamic rendering, M1 demo scene | ✅ complete |
-| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | 🔄 in progress (ECS core landed) |
+| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | 🔄 in progress (ECS + transform hierarchy landed) |
 | M3 | Asset pipeline | Cooking, streaming, ASTC/KTX2 textures, asset cache | ⬜ planned |
 | M4 | Rendering features | Shadows, IBL, HDR, post-processing, MSAA/TAA | ⬜ planned |
 | M5 | Physics | Jolt integration, collision shapes, raycasts, character controller | ⬜ planned |
@@ -102,10 +102,27 @@ behaviour, non-trivial component moves, purge-on-destroy, view
 intersection/mutation/empty-storage paths, 10 000-entity churn). Host and
 host-check builds stay warning-free.
 
+✅ **Transform hierarchy** — `engine/scene/`:
+
+| Piece | File | Notes |
+| --- | --- | --- |
+| Transform components | `Transform.h` | `Transform` (T·R·S, trivially copyable), `Parent` (null handle == root), `WorldTransform` (cached world matrix) |
+| Hierarchy evaluation | `SceneHierarchy.h` / `.cpp` | `setParent`/`detach` with dead-handle, self-parent and cycle rejection; `update()` derives CSR child lists from `Parent` components and evaluates level-order (breadth first) so parents are written before children, with no recursion depth tied to hierarchy depth |
+| Robustness | `SceneHierarchy.cpp` | Destroyed parents demote children to orphan roots (`UpdateStats::orphans`); cycles written directly into `Parent` are reported (`cyclic`) and fall back to local matrices instead of hanging |
+
+Child lists are derived per update rather than stored, so the hierarchy cannot
+drift out of sync with the registry when entities are destroyed; the CSR buffers
+are reused across frames (allocation-free in steady state).
+
+Covered by `engine/tests/test_transform.cpp` (16 cases: matrix composition,
+parenting/detach, cycle rejection, translation/rotation/scale inheritance,
+three-level accumulation, idempotent re-update, Transform-less entities,
+orphans, direct cycles, self-parenting, a 1 000-deep chain and an 8 192-entity
+wide hierarchy).
+
 ### Remaining acceptance criteria
 
-* `engine/scene/`: transform hierarchy (parent/child, dirty propagation, world
-  matrices), camera components, per-frame frustum culling and draw-list
+* `engine/scene/`: camera components, per-frame frustum culling and draw-list
   generation.
 * `engine/assets/`: glTF 2.0 (binary + JSON) loader → meshes/materials/textures
   through the RHI; KTX2/ASTC decode path stubbed for M3.

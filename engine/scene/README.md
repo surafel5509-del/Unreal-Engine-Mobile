@@ -14,6 +14,8 @@ data-driven pass list.
 | `ComponentStorage.h` | `SparseSet` (O(1) index ↔ dense position, swap-remove), `IComponentStorage` (type-erased purge path), `ComponentStorage<T>` (dense value array parallel to the index array), `componentTypeId<T>()` (RTTI-free per-type ids) |
 | `World.h` / `World.cpp` | Entity registry (create/destroy with slot recycling and generation bumping), typed component API (`add`/`remove`/`get`/`has`/`count`), storage registry indexed by type id, `Stats` diagnostics |
 | `View.h` | `View<Ts...>` intersection iteration over the smallest matching storage; iterators yield `std::tuple<Entity, Ts&...>` (structured bindings, in-place mutation); `each()`, `collectEntities()`, `size()` |
+| `Transform.h` | `Transform` (local T·R·S, `localMatrix()`), `Parent` (null handle == root), `WorldTransform` (cached world matrix) — all trivially copyable |
+| `SceneHierarchy.h` / `.cpp` | `setParent`/`detach` (rejects dead handles, self-parenting, cycles), `isAncestorOf`, `depthOf`, `childrenOf`, and `update()` which derives CSR child lists from `Parent` components and evaluates them level-order into `WorldTransform` |
 
 ```cpp
 #include "scene/View.h"
@@ -44,13 +46,38 @@ Semantics worth knowing before using it:
 * **Thread-safety:** not thread-safe and deliberately lock-free; one `World` is
   owned and driven by a single simulation thread.
 
-Tests: `engine/tests/test_ecs.cpp` — 20 cases covering handle semantics,
-sparse-set behaviour, non-trivial component moves, purge-on-destroy, view
-intersection/mutation/empty-storage paths, and a 10 000-entity churn test.
+Hierarchy semantics worth knowing:
+
+```cpp
+nova::scene::SceneHierarchy hierarchy;
+hierarchy.setParent(world, child, root);   // adds identity Transforms if missing
+hierarchy.update(world);                   // writes WorldTransform for every owner
+
+const auto& stats = hierarchy.lastStats();  // roots / written / orphans / cyclic / depth
+```
+
+* Child lists are **derived** from `Parent` components on every `update()`, so a
+  destroyed parent can never leave stale hierarchy state behind — its children
+  are demoted to orphan roots and counted in `UpdateStats::orphans`.
+* Evaluation is **level-order** (breadth first) over entity indices: parents are
+  always written before children read them, and stack usage does not grow with
+  hierarchy depth (verified with a 1 000-deep chain).
+* **Cycles cannot hang** the traversal: entities that form one are never reached
+  from a root, are counted in `UpdateStats::cyclic`, get their local matrix as a
+  best-effort world matrix, and are logged once. `setParent` rejects cycles up
+  front, so this path only triggers on `Parent` components written directly.
+* CSR scratch buffers (`counts`/`offsets`/`indices`/levels) are reused across
+  frames; `reset()` releases them.
+
+Tests: `engine/tests/test_ecs.cpp` (20 cases — handle semantics, sparse-set
+behaviour, non-trivial component moves, purge-on-destroy, view
+intersection/mutation/empty-storage paths, 10 000-entity churn) and
+`engine/tests/test_transform.cpp` (16 cases — matrix composition, parenting and
+detach, cycle rejection, translation/rotation/scale inheritance, orphans,
+direct cycles, deep chain, wide hierarchy).
 
 ## Still planned for M2
 
-* Transform hierarchy (parent/child, dirty propagation, world matrices)
 * Camera components (perspective/orthographic) producing view-projection matrices
 * Frustum culling and draw-list generation
 * Pass list consumed by `renderer::Renderer` (frame graph)

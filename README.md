@@ -164,7 +164,7 @@ Override per-invocation:
 Everything that does not need a GPU or an Android device is verified on the
 host. This is the same entry point CI uses.
 
-### 4.1 Unit tests (61 test cases, 30 629 assertions)
+### 4.1 Unit tests (77 test cases, 48 144 assertions)
 
 ```bash
 cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNOVA_BUILD_TESTS=ON
@@ -191,6 +191,7 @@ Run the binary directly for doctest filtering:
 | `test_vfs.cpp` | Data mount read/normalize, missing files, temporary directories |
 | `test_renderer.cpp` | Mock-RHI: init + rollback on failure, exact recorded draw sequence, UBO ring alternation, pipeline rebuild on format change, frame skipping, view-projection aspect/Y-flip |
 | `test_ecs.cpp` | M2 ECS: entity handles + generation recycling, sparse-set swap-remove, non-trivial component moves, purge-on-destroy, view intersection/mutation/empty-storage paths, 10 000-entity churn |
+| `test_transform.cpp` | M2 hierarchy: `Transform::localMatrix` composition, parenting/detach, cycle rejection, world-matrix accumulation (translation/rotation/scale), orphans, direct-cycle detection, 1 000-deep chain, 8 192-entity wide hierarchy |
 
 ### 4.2 Compile-checking the Android-only code on the host
 
@@ -295,7 +296,7 @@ Unreal-Engine-Mobile/
 │   │   ├── vulkan/             Vulkan 1.3 backend (device, swapchain, resources)
 │   │   └── gles/               OpenGL ES 3.2 fallback (post-M1)
 │   ├── renderer/               M1 renderer: gradient + triangle passes
-│   ├── scene/                  M2 ECS: Entity, ComponentStorage, World, View
+│   ├── scene/                  M2 ECS + transform hierarchy (World, View, SceneHierarchy)
 │   ├── assets/ physics/ audio/ animation/
 │   ├── scripting/ ui/ net/ editor_core/     (later milestones — see each README)
 │   └── tests/                  doctest suites + CMake/CTest wiring
