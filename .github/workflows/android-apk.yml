@@ -99,7 +99,7 @@ jobs:
         if: failure()
         run: |
           if [ -f gradle-build.log ]; then
-            grep -nE "error:|FAILURE:|What went wrong|Execution failed|Caused by:|CMake Error|FAILED" gradle-build.log \
+            grep -nE "error:|FAILURE:|What went wrong|Execution failed|Caused by:|CMake Error|FAILED|e: file:" gradle-build.log \
               | head -60 \
               | cut -c1-800 \
               | while IFS= read -r line; do

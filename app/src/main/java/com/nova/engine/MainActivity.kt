@@ -141,10 +141,13 @@ class MainActivity : Activity() {
         } else {
             // Android 8-10: the insets-controller API does not exist yet; the
             // deprecated visibility flags are the only immersive mode there.
+            // IMMERSIVE_STICKY (transient bars on swipe) is the pre-30
+            // equivalent of BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE; the
+            // *_SWIPE variant was removed from the SDK in API 34.
             @Suppress("DEPRECATION")
             run {
                 window.decorView.systemUiVisibility =
-                    View.SYSTEM_UI_FLAG_IMMERSIVE_SWIPE or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
                         View.SYSTEM_UI_FLAG_FULLSCREEN or
                         View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
                         View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
