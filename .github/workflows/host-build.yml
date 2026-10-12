@@ -51,7 +51,24 @@ jobs:
           -DNOVA_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build/host -j 2
+        run: |
+          set -o pipefail
+          cmake --build build/host -j 2 2>&1 | tee build.log
+
+      - name: Surface compiler errors
+        # Runner logs are only visible in the web UI, so re-publish the first
+        # diagnostics as check annotations (visible on the run summary, in
+        # `gh run view` and via the check-runs API).
+        if: failure()
+        run: |
+          if [ -f build.log ]; then
+            grep -nE "error:|fatal error|FAILED:|undefined reference" build.log \
+              | head -40 \
+              | cut -c1-800 \
+              | while IFS= read -r line; do
+                  echo "::error title=${{ matrix.compiler }} build::${line}"
+                done
+          fi
 
       - name: Test
         run: ctest --test-dir build/host --output-on-failure
@@ -81,7 +98,21 @@ jobs:
           -DNOVA_JNI_INCLUDE="$JAVA_HOME/include"
 
       - name: Build
-        run: cmake --build build/host-check -j 2
+        run: |
+          set -o pipefail
+          cmake --build build/host-check -j 2 2>&1 | tee build.log
+
+      - name: Surface compiler errors
+        if: failure()
+        run: |
+          if [ -f build.log ]; then
+            grep -nE "error:|fatal error|FAILED:|undefined reference" build.log \
+              | head -40 \
+              | cut -c1-800 \
+              | while IFS= read -r line; do
+                  echo "::error title=host-check build::${line}"
+                done
+          fi
 
       - name: Test
         run: ctest --test-dir build/host-check --output-on-failure
