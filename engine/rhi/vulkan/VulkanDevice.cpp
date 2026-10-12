@@ -383,6 +383,9 @@ private:
     VkInstance m_instance = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
     PFN_vkSetDebugUtilsObjectNameEXT m_setObjectName = nullptr;
+    /// Vulkan 1.1 core, so the API-26/27 loader does not export it; resolved in
+    /// createInstance with a KHR-alias fallback (see Android link constraints).
+    PFN_vkGetPhysicalDeviceFeatures2 m_getPhysicalDeviceFeatures2 = nullptr;
     bool m_validationEnabled = false;
 
     // ---- device level ----
@@ -668,6 +671,24 @@ bool VulkanDevice::createInstance(const DeviceDesc& desc) {
         m_setObjectName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
             vkGetInstanceProcAddr(m_instance, "vkSetDebugUtilsObjectNameEXT"));
     }
+
+    // vkGetPhysicalDeviceFeatures2 is Vulkan 1.1 core: the Android loader
+    // exports it only from API 28, while the package installs from API 26 and
+    // the NDK links against the minSdk stub libvulkan.so, so a direct call is
+    // an undefined symbol at link time. Resolve it (core name first, then the
+    // KHR alias the promotion came from, which 1.0-era drivers do export);
+    // without either there is no way to query the 1.3 feature chain at all.
+    m_getPhysicalDeviceFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+        vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceFeatures2"));
+    if (m_getPhysicalDeviceFeatures2 == nullptr) {
+        m_getPhysicalDeviceFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+            vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceFeatures2KHR"));
+    }
+    if (m_getPhysicalDeviceFeatures2 == nullptr) {
+        NOVA_LOG_ERROR("vulkan: loader exposes neither vkGetPhysicalDeviceFeatures2 "
+                       "nor the KHR alias — cannot query device features");
+        return false;
+    }
     return true;
 }
 
@@ -699,7 +720,7 @@ bool VulkanDevice::pickPhysicalDevice() {
         VkPhysicalDeviceFeatures2 features2{};
         features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
         features2.pNext = &features13;
-        vkGetPhysicalDeviceFeatures2(candidate, &features2);
+        m_getPhysicalDeviceFeatures2(candidate, &features2);
         if (!features13.dynamicRendering || !features13.synchronization2) {
             NOVA_LOG_INFO("vulkan: skipping %s (dynamicRendering/synchronization2 off)",
                           props.deviceName);

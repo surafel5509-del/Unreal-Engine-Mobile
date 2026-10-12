@@ -390,7 +390,7 @@ host build, so they are worth recording rather than rediscovering:
    library. The NDK links a **shared** library with `-Wl,--no-undefined`, so it
    fails immediately. Treat "the host links" as no evidence about the device link.
 
-2. **Vulkan 1.3 entry points must be fetched, not linked.** Android's
+2. **Entry points newer than the minSdk loader must be fetched, not linked.** Android's
    `libvulkan.so` exports only what its API level supports: the synchronization2
    and dynamic-rendering entry points (`vkQueueSubmit2`, `vkCmdPipelineBarrier2`,
    `vkCmdBeginRendering`, `vkCmdEndRendering`) appear at **API 33**, while the
@@ -413,7 +413,13 @@ host build, so they are worth recording rather than rediscovering:
    instance request is likewise clamped to the loader's own version
    (`vkEnumerateInstanceVersion`, absent on pre-1.1 loaders), because pre-1.1
    loaders reject a too-new `apiVersion` with `VK_ERROR_INCOMPATIBLE_DRIVER` and
-   would mask the device-capability story.
+   would mask the device-capability story. The same rule bites one level down:
+   `vkGetPhysicalDeviceFeatures2` is Vulkan **1.1** core, exported only from
+   API 28, so with minSdk 26 it is resolved through `vkGetInstanceProcAddr`
+   (core name first, `…Features2KHR` alias as fallback) right after instance
+   creation. Rule of thumb for this directory: anything not in the Vulkan 1.0
+   core or the WSI/surface KHR extensions is a function pointer, never a link
+   dependency.
 
 Descriptor management: one `VkDescriptorSetLayout` (`set = 0`, single
 **non-dynamic** UBO binding, `VERTEX|FRAGMENT` stage flags) and a pool sized
