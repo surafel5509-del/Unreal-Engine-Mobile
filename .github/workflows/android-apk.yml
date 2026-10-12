@@ -1,0 +1,118 @@
+name: android-apk
+
+# Builds the runnable demo APK with the real Android toolchain — the path the
+# host workflows cannot cover: JDK 17, AGP 8.5.2, Gradle 8.7 (wrapper),
+# NDK 26.3.11579264 and CMake 3.22.1 compiling the C++20 engine for arm64-v8a,
+# Kotlin sources, JNI bridge, manifest and the checked-in SPIR-V assets.
+#
+# The resulting APK is uploaded as a build artifact and can be installed with:
+#   adb install -r nova-engine-debug.apk
+#
+# Shader compilation is intentionally left on "auto" (gradle.properties): no
+# glslangValidator exists on the runner, so the task skips itself and the APK
+# ships the committed .spv files — exactly what a plain checkout does.
+
+on:
+  push:
+    branches: [main, 'arena/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Assemble debug APK (arm64-v8a)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          # third_party/glm and third_party/vulkan-headers are submodules and
+          # are required by the native CMake build.
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties', '**/*.gradle.kts', 'gradle.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install Android SDK packages (NDK r26, CMake 3.22.1, platform 34)
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK" ]; then
+            echo "ANDROID_HOME/ANDROID_SDK_ROOT not set on this runner" >&2
+            exit 1
+          fi
+          echo "Android SDK: $SDK"
+          SDKMANAGER="$(find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found under $SDK/cmdline-tools" >&2
+            find "$SDK" -maxdepth 2 -type d | head -30
+            exit 1
+          fi
+          # Licenses are pre-accepted on the GitHub image; tolerate failure.
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;26.3.11579264" \
+            "cmake;3.22.1"
+          "$SDKMANAGER" --list_installed 2>/dev/null | head -20 || true
+          test -d "$SDK/ndk/26.3.11579264" || { echo "NDK 26.3.11579264 missing" >&2; exit 1; }
+          test -d "$SDK/cmake/3.22.1" || { echo "CMake 3.22.1 missing" >&2; exit 1; }
+
+      - name: Gradle wrapper sanity check
+        run: ./gradlew --version --no-daemon
+
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Inspect the APK
+        run: |
+          set -euo pipefail
+          ls -l app/build/outputs/apk/debug/
+          APK="$(find app/build/outputs/apk/debug -name '*.apk' | head -1)"
+          echo "APK: $APK ($(du -h "$APK" | cut -f1))"
+          # The native engine library and the SPIR-V assets must be packaged,
+          # otherwise the app would install and fail at load time.
+          unzip -l "$APK" | grep -E "lib/arm64-v8a/libnova\.so" || { echo "libnova.so missing from the APK" >&2; exit 1; }
+          unzip -l "$APK" | grep -E "assets/shaders/.*\.spv" || { echo "compiled shaders missing from the APK" >&2; exit 1; }
+          unzip -l "$APK" | grep -E "classes\.dex" || { echo "no dex in the APK" >&2; exit 1; }
+          echo "apk_path=$APK" >> "$GITHUB_ENV"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-engine-debug-apk
+          path: ${{ env.apk_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload native build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-logs
+          path: |
+            app/.cxx/**/*.txt
+            app/build/outputs/logs/**
+          if-no-files-found: ignore
+          retention-days: 7

@@ -252,6 +252,26 @@ instead of silently doing nothing.
 | `NOVA_ENABLE_SANITIZERS` | `OFF` | ASan/UBSan |
 | `NOVA_ENABLE_LTO` | `ON` | IPO for release builds |
 
+### 4.5 Continuous integration
+
+Two GitHub Actions workflows run on every push and pull request:
+
+| Workflow | File | What it proves |
+| --- | --- | --- |
+| `host-build` | [.github/workflows/host-build.yml](.github/workflows/host-build.yml) | Unit tests on gcc **and** clang (`build/host`), plus the Android-only sources (JNI bridge, Vulkan backend, `AAssetManager`/`ANativeWindow`) compile-checked against the shims in `tools/host_check` (`build/host-check`). Zero first-party warnings. |
+| `android-apk` | [.github/workflows/android-apk.yml](.github/workflows/android-apk.yml) | The real device build path: JDK 17 + AGP 8.5.2 + Gradle 8.7 wrapper + NDK `26.3.11579264` + CMake `3.22.1` produce `app-debug.apk` for `arm64-v8a`. The APK is inspected (`libnova.so`, `assets/shaders/*.spv`, `classes.dex`) and uploaded as the **`nova-engine-debug-apk`** artifact. |
+
+Download the APK from the run's *Artifacts* section (or
+`gh run download --name nova-engine-debug-apk`) and install it:
+
+```bash
+adb install -r nova-engine-debug.apk
+```
+
+The runner has no `glslangValidator`, so `:app:compileShaders` skips itself
+(`nova.compileShaders=auto`) and the APK ships the checked-in `.spv` files —
+identical to a plain local checkout.
+
 ---
 
 ## 5. Shaders
