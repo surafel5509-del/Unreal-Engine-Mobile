@@ -261,12 +261,40 @@ Two GitHub Actions workflows run on every push and pull request:
 | `host-build` | [.github/workflows/host-build.yml](.github/workflows/host-build.yml) | Unit tests on gcc, clang **and** clang+libc++ (`build/host`) — the last one reproduces the standard library the Android NDK builds against, so device-only breaks fail on the host in seconds. A separate job compile-checks the Android-only sources (JNI bridge, Vulkan backend, `AAssetManager`/`ANativeWindow`) against the shims in `tools/host_check` (`build/host-check`). Zero first-party warnings; compiler errors are re-published as check annotations. |
 | `android-apk` | [.github/workflows/android-apk.yml](.github/workflows/android-apk.yml) | The real device build path: JDK 17 + AGP 8.5.2 + Gradle 8.7 wrapper + NDK `26.3.11579264` + CMake `3.22.1` produce `app-debug.apk` for `arm64-v8a`. The APK is inspected (`libnova.so`, `assets/shaders/*.spv`, `classes.dex`) and uploaded as the **`nova-engine-debug-apk`** artifact. |
 
-Download the APK from the run's *Artifacts* section (or
-`gh run download --name nova-engine-debug-apk`) and install it:
+Every successful run republishes the APK as a **release asset**, which downloads
+as the bare `.apk` (no zip wrapper) — the easiest route from a phone browser or
+`curl`:
+
+<https://github.com/surafel5509-del/Unreal-Engine-Mobile/releases/download/apk-latest/nova-engine-debug.apk>
+
+The run's *Artifacts* section carries the same binary as
+`nova-engine-debug-apk`; note that **GitHub artifacts always download as a
+`.zip`**, so unzip first (`unzip nova-engine-debug-apk.zip`) — the APK inside is
+named `nova-engine-debug.apk`. Install with:
 
 ```bash
 adb install -r nova-engine-debug.apk
 ```
+
+Each run also verifies the package before publishing it: `apksigner verify
+--verbose --print-certs` (v2/v3 signature schemes), `zipalign -c 4`, and
+`aapt dump badging` (package id, `sdkVersion`, `native-code`). The output is
+posted to the job summary and as `apk-verify` check annotations.
+
+**Troubleshooting — "There was a problem parsing the package."** This dialog
+comes from the device's package installer, not from the engine, and in practice
+has three causes, in order of likelihood:
+
+1. The file installed was the artifact **zip** (or a zip renamed to `.apk`).
+   A real APK lists `AndroidManifest.xml` first: `unzip -l file.apk | head`.
+   Use the release link above, or unzip the artifact first.
+2. The download was truncated (flaky mobile connection). Compare the file size
+   against the asset size shown on the release page, or re-download over `adb`.
+3. The device runs **Android 11 or older**. `minSdk` is 31 (Android 12) because
+   the Vulkan backend targets Vulkan 1.3; check with
+   `adb shell getprop ro.build.version.sdk`. On such a device the GLES 3.2
+   fallback backend (a later milestone) is the intended path, not a lower
+   `minSdk`.
 
 The runner has no `glslangValidator`, so `:app:compileShaders` skips itself
 (`nova.compileShaders=auto`) and the APK ships the checked-in `.spv` files —

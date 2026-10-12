@@ -22,6 +22,11 @@ concurrency:
   group: android-apk-${{ github.ref }}
   cancel-in-progress: true
 
+# The apk-latest release is republished by every green run so there is always a
+# direct, phone-friendly .apk download link (artifacts download as .zip).
+permissions:
+  contents: write
+
 jobs:
   apk:
     name: Assemble debug APK (arm64-v8a)
@@ -115,13 +120,64 @@ jobs:
           unzip -l "$APK" | grep -E "classes\.dex" || { echo "no dex in the APK" >&2; exit 1; }
           echo "apk_path=$APK" >> "$GITHUB_ENV"
 
+      - name: Verify signature, alignment and badging
+        # A phone reports "There was a problem parsing the package." for an
+        # unsigned APK, a truncated download, a zip renamed to .apk, or a device
+        # older than minSdk. Prove none of the build-side causes apply and
+        # publish the proof as check annotations plus a job summary, because
+        # runner logs are not reachable from every environment.
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          BT="$SDK/build-tools/34.0.0"
+          APK="${{ env.apk_path }}"
+          {
+            echo "## APK verification (apksigner / zipalign / aapt)"
+            echo '```'
+            "$BT/apksigner" verify --verbose --print-certs "$APK"
+            if "$BT/zipalign" -c 4 "$APK"; then
+              echo "zipalign -c 4: OK (4-byte aligned)"
+            else
+              echo "zipalign -c 4: FAILED"
+              exit 1
+            fi
+            "$BT/aapt" dump badging "$APK" \
+              | grep -E "^package:|sdkVersion:|targetSdkVersion:|native-code:|application-label:"
+            echo '```'
+          } | tee apk-verify.log >> "$GITHUB_STEP_SUMMARY"
+          grep -E "Verifies|Verified using|zipalign|sdkVersion:|targetSdkVersion:|native-code:|^package:" apk-verify.log \
+            | cut -c1-400 \
+            | while IFS= read -r line; do echo "::notice title=apk-verify::${line}"; done
+          # Stable name for the artifact and the release asset.
+          mkdir -p dist
+          cp "$APK" dist/nova-engine-debug.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: nova-engine-debug-apk
-          path: ${{ env.apk_path }}
+          path: dist/nova-engine-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish apk-latest release (direct .apk download)
+        # GitHub artifacts always download as a .zip; installing that zip (or a
+        # renamed copy of it) is the classic cause of the parse-error dialog on
+        # the device. A release asset downloads as the bare APK, so every green
+        # run republishes one stable URL that works from a phone browser.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release delete apk-latest --yes --cleanup-tag || true
+          gh release create apk-latest \
+            --target "$GITHUB_SHA" \
+            --title "Nova Engine debug APK (latest)" \
+            --notes "Republished automatically by every successful android-apk run. arm64-v8a, minSdk 31 (Android 12 or newer). Install with: adb install -r nova-engine-debug.apk" \
+            --prerelease \
+            dist/nova-engine-debug.apk
+          echo "Direct download: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/nova-engine-debug.apk" \
+            >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload native build logs on failure
         if: failure()
