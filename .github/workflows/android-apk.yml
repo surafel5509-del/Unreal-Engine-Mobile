@@ -83,7 +83,24 @@ jobs:
         run: ./gradlew --version --no-daemon
 
       - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee gradle-build.log
+
+      - name: Surface build errors
+        # Runner logs are only visible in the web UI, so re-publish the first
+        # Gradle/Kotlin/CMake diagnostics as check annotations (visible on the
+        # run summary, in `gh run view` and via the check-runs API).
+        if: failure()
+        run: |
+          if [ -f gradle-build.log ]; then
+            grep -nE "error:|FAILURE:|What went wrong|Execution failed|Caused by:|CMake Error|FAILED" gradle-build.log \
+              | head -60 \
+              | cut -c1-800 \
+              | while IFS= read -r line; do
+                  echo "::error title=assembleDebug::${line}"
+                done
+          fi
 
       - name: Inspect the APK
         run: |

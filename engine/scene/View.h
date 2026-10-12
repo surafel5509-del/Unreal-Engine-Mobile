@@ -61,13 +61,15 @@ public:
 
         value_type operator*() const {
             const Entity handle = currentEntity();
-            return value_type{handle, *m_view->m_world->get<Ts>(handle)...};
+            // `template` is required: m_view->m_world is a dependent
+            // expression, and clang (unlike gcc) rejects the call without it.
+            return value_type{handle, *m_view->m_world->template get<Ts>(handle)...};
         }
 
         /// Component tuple without the handle, for systems that ignore it.
         [[nodiscard]] std::tuple<Ts&...> components() const {
             const Entity handle = currentEntity();
-            return std::tuple<Ts&...>{*m_view->m_world->get<Ts>(handle)...};
+            return std::tuple<Ts&...>{*m_view->m_world->template get<Ts>(handle)...};
         }
 
         iterator& operator++() {
