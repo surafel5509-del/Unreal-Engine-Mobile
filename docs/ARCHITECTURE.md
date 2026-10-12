@@ -625,10 +625,17 @@ and that a failed `createShaderModule` rolls the renderer back to a clean state.
 That gives renderer-behaviour coverage with no GPU, no device, and no Vulkan
 loader.
 
-Current totals: **132 test cases, 52 031 assertions** (M0/M1 suites plus the M2
+Current totals: **133 test cases, 52 061 assertions** (M0/M1 suites plus the M2
 ECS, transform-hierarchy, culling, draw-list, JSON and base64 suites), passing in
-both the plain host build and the host-check build, with zero first-party
-compiler warnings under `-Wall -Wextra -Wshadow`.
+the plain host build under gcc, clang and clang+libc++, and in the host-check
+build, with zero first-party compiler warnings under `-Wall -Wextra -Wshadow`.
+
+CI runs the suite three ways on purpose. The Android NDK compiles this engine
+against **libc++**, and libstdc++ disagrees with it in ways that only surface on
+a device build — libc++ declares the floating-point `std::from_chars` overload
+as *deleted*, which broke the JSON reader on arm64 while every host build stayed
+green. The `clang-libcxx` matrix entry reproduces that standard library on the
+host, so the next such break costs 40 seconds instead of an APK build.
 
 ---
 

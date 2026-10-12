@@ -175,7 +175,7 @@ real Vulkan device.
 Both are pure functions over caller-owned buffers, so the future streaming
 thread (M3) can reuse them unchanged.
 
-Covered by `engine/tests/test_json.cpp` (14 cases) and
+Covered by `engine/tests/test_json.cpp` (15 cases) and
 `engine/tests/test_base64.cpp` (7 cases) — every rejection path included, plus a
 glTF-shaped document read end to end.
 

@@ -4,7 +4,6 @@
 
 #include "core/Log.h"
 
-#include <charconv>
 #include <cmath>
 #include <cstring>
 
@@ -230,9 +229,9 @@ bool readHex4(std::string_view text, usize& pos, u32& out) {
 /// `[ "-" ] int [ "." digits ] [ ("e"|"E") ["-"|"+"] digits ]`, where `int` is
 /// `0` or `[1-9] digits` (no leading zeros, no `+`, no `inf`/`nan`).
 ///
-/// std::from_chars follows the C literal grammar, which is more permissive than
-/// JSON ("1." and "01" would scan), so the text is matched here first and only
-/// the exact range is then converted.
+/// Matching the grammar explicitly (instead of letting a conversion routine scan
+/// as far as it likes) is what rejects `1.` and `01`, both of which the C
+/// floating-point literal grammar accepts.
 bool scanJsonNumber(std::string_view text, usize start, usize& outLength) {
     usize index = start;
     if (index < text.size() && text[index] == '-') {
@@ -277,6 +276,124 @@ bool scanJsonNumber(std::string_view text, usize start, usize& outLength) {
     }
 
     outLength = index - start;
+    return true;
+}
+
+/// Exact powers of ten representable in a double (10^0 .. 10^22). Multiplying or
+/// dividing by one of these rounds exactly once, which is what makes Clinger's
+/// fast path correctly rounded.
+constexpr double kPow10[] = {
+    1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
+    1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+};
+
+/// Digits kept in the u64 significand before the rest is dropped.
+constexpr usize kMaxSignificandDigits = 19;
+
+/// Digits/exponent range where one multiply or divide by an exact power of ten
+/// is provably correctly rounded (Clinger, "How to Read Floating Point Numbers
+/// Accurately", 1990).
+constexpr usize kFastPathDigits = 15;
+constexpr i32 kFastPathExponent = 22;
+
+/// Convert the JSON number at `text[start .. start + length)` to a double.
+///
+/// Neither std::from_chars nor strtod is used, deliberately:
+///  * libc++ — the standard library the Android NDK ships — declares the
+///    floating-point `std::from_chars` overload as **deleted**, so it does not
+///    compile there even though libstdc++ accepts it;
+///  * `strtod` interprets the decimal point through the current C locale, which
+///    a JSON reader must not depend on.
+///
+/// The fast path (<= 15 significant digits, decimal exponent within +-22) covers
+/// every number a glTF document contains and is correctly rounded. Longer or
+/// wider inputs keep 19 significant digits and scale with std::pow, which stays
+/// within a few ULP. Values whose magnitude exceeds double (e.g. 1e400) are
+/// reported as failures rather than silently becoming infinity.
+bool jsonNumberToDouble(std::string_view text, usize start, usize length, double& out) {
+    usize index = start;
+    const usize end = start + length;
+
+    bool negative = false;
+    if (index < end && text[index] == '-') {
+        negative = true;
+        ++index;
+    }
+
+    u64 significand = 0;
+    usize significantDigits = 0;
+    usize droppedDigits = 0;
+    i32 exponent = 0;  // scale to apply: value = significand * 10^exponent
+
+    auto consumeDigit = [&](char character, bool isFractionDigit) {
+        const u32 digit = static_cast<u32>(character - '0');
+        if (significantDigits < kMaxSignificandDigits) {
+            significand = significand * 10u + digit;
+            ++significantDigits;
+        } else {
+            ++droppedDigits;
+        }
+        if (isFractionDigit) {
+            --exponent;
+        }
+    };
+
+    while (index < end && text[index] >= '0' && text[index] <= '9') {
+        consumeDigit(text[index], false);
+        ++index;
+    }
+    if (index < end && text[index] == '.') {
+        ++index;
+        while (index < end && text[index] >= '0' && text[index] <= '9') {
+            consumeDigit(text[index], true);
+            ++index;
+        }
+    }
+    if (index < end && (text[index] == 'e' || text[index] == 'E')) {
+        ++index;
+        bool exponentNegative = false;
+        if (index < end && (text[index] == '+' || text[index] == '-')) {
+            exponentNegative = text[index] == '-';
+            ++index;
+        }
+        i32 explicitExponent = 0;
+        while (index < end && text[index] >= '0' && text[index] <= '9') {
+            // Saturate: the grammar is already validated, and any exponent this
+            // large overflows a double anyway.
+            if (explicitExponent < 100000) {
+                explicitExponent = explicitExponent * 10 + (text[index] - '0');
+            }
+            ++index;
+        }
+        exponent += exponentNegative ? -explicitExponent : explicitExponent;
+    }
+    if (index != end) {
+        return false;  // defensive: the caller matched exactly `length` bytes
+    }
+
+    // Dropped digits shift the decimal point back to where they belonged.
+    if (droppedDigits > 0) {
+        exponent += static_cast<i32>(droppedDigits);
+    }
+
+    double value = 0.0;
+    const bool fastPath = droppedDigits == 0 && significantDigits <= kFastPathDigits &&
+                          exponent >= -kFastPathExponent && exponent <= kFastPathExponent;
+    if (fastPath) {
+        value = static_cast<double>(significand);
+        if (exponent < 0) {
+            value /= kPow10[static_cast<usize>(-exponent)];
+        } else if (exponent > 0) {
+            value *= kPow10[static_cast<usize>(exponent)];
+        }
+    } else {
+        value = static_cast<double>(significand) * std::pow(10.0, static_cast<double>(exponent));
+    }
+
+    if (!std::isfinite(value)) {
+        return false;  // magnitude beyond double (1e400) is not JSON we accept
+    }
+    out = negative ? -value : value;
     return true;
 }
 
@@ -386,15 +503,10 @@ private:
             return fail(JsonErrorCode::kInvalidNumber);
         }
 
-        const char* const begin = m_text.data() + m_pos;
-        const char* const end = begin + length;
         double value = 0.0;
-        // Locale independent, and restricted to the exact matched range so a
-        // permissive prefix cannot be accepted.
-        const auto result = std::from_chars(begin, end, value);
-        if (result.ec != std::errc{} || result.ptr != end) {
-            // errc::result_out_of_range means the magnitude exceeds double
-            // (e.g. 1e400); rejected rather than silently turned into inf.
+        if (!jsonNumberToDouble(m_text, m_pos, length, value)) {
+            // The magnitude exceeds double (e.g. 1e400): rejected rather than
+            // silently turned into infinity.
             return fail(JsonErrorCode::kInvalidNumber);
         }
         m_pos += length;

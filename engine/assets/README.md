@@ -38,6 +38,14 @@ large configuration surface. Design points worth knowing before using it:
   first.
 * **Strings are decoded to UTF-8**, including `\uXXXX` and surrogate pairs; a
   lone surrogate or an unescaped control character is an error.
+* **Numbers are converted without `std::from_chars` or `strtod`.** libc++ — the
+  standard library the Android NDK ships — declares the floating-point
+  `from_chars` overload as *deleted*, and `strtod` reads the decimal point from
+  the C locale. The reader matches the JSON number grammar itself and converts
+  with Clinger's fast path (≤ 15 significant digits, exponent within ±22 → one
+  exactly-rounded multiply/divide by a table power of ten), falling back to a
+  19-digit significand scaled by `std::pow` for longer inputs. Magnitudes beyond
+  `double` (`1e400`) are errors, not infinity.
 
 ```cpp
 const auto result = assets::parseJson(text);
@@ -74,11 +82,13 @@ mutate a document another thread is reading.
 
 ## Tests
 
-`engine/tests/test_json.cpp` (14 cases: scalars, the number grammar and its
+`engine/tests/test_json.cpp` (15 cases: scalars, the number grammar and its
 rejections, string escapes and UTF-8/surrogate handling, arrays, objects and
 duplicate keys, whitespace/BOM, empty input, trailing content, the depth limit,
-fallback getters, integer clamping, error offsets and locations, a glTF-shaped
-document, and a 5 000-element document) and `engine/tests/test_base64.cpp`
+fallback getters, integer clamping, locale-free number conversion (fast path,
+19-digit fallback, 2^53 rounding, overflow rejection), error offsets and
+locations, a glTF-shaped document, and a 5 000-element document) and
+`engine/tests/test_base64.cpp`
 (7 cases: RFC 4648 vectors both ways, all-lengths and all-byte-values round
 trips, MIME whitespace, malformed input, data-URI splitting and decoding).
 

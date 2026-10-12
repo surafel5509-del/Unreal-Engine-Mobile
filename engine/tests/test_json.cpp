@@ -77,6 +77,38 @@ TEST_CASE("Json accepts the number grammar and rejects the rest") {
     expectFailure("nulll", JsonErrorCode::kTrailingContent);
 }
 
+TEST_CASE("Json number conversion is locale-free and portable") {
+    // The reader converts numbers itself: libc++ (the NDK's standard library)
+    // declares the floating-point std::from_chars overload as deleted, and
+    // strtod would depend on the C locale's decimal point.
+    CHECK(parseOk("0.1").asNumber() == doctest::Approx(0.1));
+    CHECK(parseOk("3.14159265358979").asNumber() == doctest::Approx(3.14159265358979));
+    CHECK(parseOk("-273.15").asNumber() == doctest::Approx(-273.15));
+    CHECK(parseOk("6.02e23").asNumber() == doctest::Approx(6.02e23));
+    CHECK(parseOk("1.6e-19").asNumber() == doctest::Approx(1.6e-19));
+    CHECK(parseOk("-0").asNumber() == doctest::Approx(0.0));
+
+    // Exact integers up to 2^53 survive the round trip; past that a JSON number
+    // stored as a double rounds, which is the documented behaviour (glTF
+    // accessor indices and counts are nowhere near this large).
+    CHECK(parseOk("9007199254740992").asNumber() == doctest::Approx(9007199254740992.0));
+    CHECK(parseOk("9007199254740993").asInteger(0) == 9007199254740992LL);
+
+    // Beyond the 15-digit fast path the reader keeps 19 significant digits and
+    // scales with pow(); a few ULP of error is acceptable and bounded.
+    CHECK(parseOk("0.1234567890123456789").asNumber() ==
+          doctest::Approx(0.12345678901234568).epsilon(1e-12));
+    CHECK(parseOk("12345678901234567890123").asNumber() ==
+          doctest::Approx(1.2345678901234568e22).epsilon(1e-9));
+
+    // Extremes that stay inside double's range, and one that does not.
+    CHECK(parseOk("1e-308").asNumber() == doctest::Approx(1e-308));
+    CHECK(parseOk("1e308").asNumber() == doctest::Approx(1e308));
+    CHECK(parseOk("4.9e-324").asNumber() >= 0.0);
+    expectFailure("1e400", JsonErrorCode::kInvalidNumber);
+    expectFailure("-1e400", JsonErrorCode::kInvalidNumber);
+}
+
 TEST_CASE("Json decodes string escapes to UTF-8") {
     CHECK(parseOk(R"("a\"b\\c\/d")").asString() == "a\"b\\c/d");
     CHECK(parseOk(R"("\b\f\n\r\t")").asString() == "\b\f\n\r\t");

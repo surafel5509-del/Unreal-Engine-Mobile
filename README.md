@@ -171,7 +171,7 @@ Override per-invocation:
 Everything that does not need a GPU or an Android device is verified on the
 host. This is the same entry point CI uses.
 
-### 4.1 Unit tests (132 test cases, 52 031 assertions)
+### 4.1 Unit tests (133 test cases, 52 061 assertions)
 
 ```bash
 cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNOVA_BUILD_TESTS=ON
@@ -258,7 +258,7 @@ Two GitHub Actions workflows run on every push and pull request:
 
 | Workflow | File | What it proves |
 | --- | --- | --- |
-| `host-build` | [.github/workflows/host-build.yml](.github/workflows/host-build.yml) | Unit tests on gcc **and** clang (`build/host`), plus the Android-only sources (JNI bridge, Vulkan backend, `AAssetManager`/`ANativeWindow`) compile-checked against the shims in `tools/host_check` (`build/host-check`). Zero first-party warnings. |
+| `host-build` | [.github/workflows/host-build.yml](.github/workflows/host-build.yml) | Unit tests on gcc, clang **and** clang+libc++ (`build/host`) — the last one reproduces the standard library the Android NDK builds against, so device-only breaks fail on the host in seconds. A separate job compile-checks the Android-only sources (JNI bridge, Vulkan backend, `AAssetManager`/`ANativeWindow`) against the shims in `tools/host_check` (`build/host-check`). Zero first-party warnings; compiler errors are re-published as check annotations. |
 | `android-apk` | [.github/workflows/android-apk.yml](.github/workflows/android-apk.yml) | The real device build path: JDK 17 + AGP 8.5.2 + Gradle 8.7 wrapper + NDK `26.3.11579264` + CMake `3.22.1` produce `app-debug.apk` for `arm64-v8a`. The APK is inspected (`libnova.so`, `assets/shaders/*.spv`, `classes.dex`) and uploaded as the **`nova-engine-debug-apk`** artifact. |
 
 Download the APK from the run's *Artifacts* section (or

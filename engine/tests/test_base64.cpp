@@ -78,8 +78,13 @@ TEST_CASE("Base64 round-trips every byte value and length") {
         core::ByteBuffer decoded;
         REQUIRE(assets::base64Decode(encoded, decoded));
         CHECK(decoded.size() == original.size());
-        const bool identical = std::memcmp(decoded.data(), original.data(),
-                                           original.size()) == 0 || original.empty();
+        // The empty check must come first: memcmp() with two null pointers and a
+        // zero length is undefined behaviour even though it looks harmless, and
+        // hardened libc implementations (the one libc++ builds against here)
+        // abort on it.
+        const bool identical =
+            original.empty() ||
+            std::memcmp(decoded.data(), original.data(), original.size()) == 0;
         CHECK(identical);
     }
 
