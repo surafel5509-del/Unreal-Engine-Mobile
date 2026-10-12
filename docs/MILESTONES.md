@@ -8,7 +8,7 @@ met **and** its code is covered by the host test/compile-check suite.
 | --- | --- | --- | --- |
 | M0 | Project skeleton | Gradle + NDK + CMake, JNI bridge, module layout, host build, test harness | ✅ complete |
 | M1 | Vulkan renderer | Vulkan 1.3 RHI, swapchain, dynamic rendering, M1 demo scene | ✅ complete |
-| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | 🔄 in progress (ECS, transform hierarchy, cameras + culling, scene-driven draw list landed) |
+| M2 | Scene & ECS | ECS, scene graph, glTF 2.0, PBR, frame graph, GLES fallback | 🔄 in progress (ECS, transform hierarchy, cameras + culling, scene-driven draw list, JSON/base64 asset foundations landed) |
 | M3 | Asset pipeline | Cooking, streaming, ASTC/KTX2 textures, asset cache | ⬜ planned |
 | M4 | Rendering features | Shadows, IBL, HDR, post-processing, MSAA/TAA | ⬜ planned |
 | M5 | Physics | Jolt integration, collision shapes, raycasts, character controller | ⬜ planned |
@@ -164,6 +164,20 @@ offsets and contents, budget drops, unknown-mesh skips, empty list). Because the
 scene stage lives in `renderer::runSceneStage()` rather than inside `Engine`,
 the per-frame path is covered on the host even though `Engine::init()` needs a
 real Vulkan device.
+
+✅ **Asset-loading foundations** — `engine/assets/`:
+
+| Piece | File | Notes |
+| --- | --- | --- |
+| JSON reader | `assets/Json.h` / `.cpp` | Strict RFC 8259 DOM reader written for a `-fno-exceptions` runtime: `Result<JsonValue, JsonError>` with a byte offset, `jsonLocate()` line/column, tolerant getters (`floatAt`, `integerAt`, `boolAt`, `stringAt`) for glTF's optional properties, document order preserved, `kMaxJsonDepth = 64` so hostile input cannot exhaust the stack, UTF-8 decoding incl. surrogate pairs, and rejection of `01` / `1.` / `+1` / `inf` / `nan` / numbers beyond `double` |
+| Base64 + data URIs | `assets/Base64.h` / `.cpp` | `base64Decode` (MIME whitespace, padding validation, non-zero-trailing-bit rejection, output always cleared first), `base64Encode` for `tools/`, `parseDataUri` / `dataUriDecode` for glTF's `data:...;base64,` embedded buffers; percent-encoded payloads are rejected rather than mis-decoded |
+
+Both are pure functions over caller-owned buffers, so the future streaming
+thread (M3) can reuse them unchanged.
+
+Covered by `engine/tests/test_json.cpp` (14 cases) and
+`engine/tests/test_base64.cpp` (7 cases) — every rejection path included, plus a
+glTF-shaped document read end to end.
 
 ### Remaining acceptance criteria
 

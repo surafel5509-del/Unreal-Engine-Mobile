@@ -13,6 +13,8 @@ add_executable(nova_tests
     test_transform.cpp
     test_culling.cpp
     test_drawlist.cpp
+    test_json.cpp
+    test_base64.cpp
 )
 
 target_include_directories(nova_tests SYSTEM PRIVATE

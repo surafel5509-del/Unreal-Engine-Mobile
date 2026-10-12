@@ -171,7 +171,7 @@ Override per-invocation:
 Everything that does not need a GPU or an Android device is verified on the
 host. This is the same entry point CI uses.
 
-### 4.1 Unit tests (111 test cases, 51 448 assertions)
+### 4.1 Unit tests (132 test cases, 52 031 assertions)
 
 ```bash
 cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Debug -DNOVA_BUILD_TESTS=ON
@@ -201,6 +201,8 @@ Run the binary directly for doctest filtering:
 | `test_transform.cpp` | M2 hierarchy: `Transform::localMatrix` composition, parenting/detach, cycle rejection, world-matrix accumulation (translation/rotation/scale), orphans, direct-cycle detection, 1 000-deep chain, 8 192-entity wide hierarchy |
 | `test_culling.cpp` | M2 cameras + culling: perspective/orthographic projection (Vulkan Y flip, `[0,1]` depth), view-matrix inversion, frustum plane extraction and point/sphere/AABB tests, world-space AABB derivation, camera exclusion, parented cameras, front-to-back sorting, 4 000-object scene |
 | `test_drawlist.cpp` | M2 scene→renderer bridge: `buildDrawCommands` order/skip rules, append semantics, full scene stage (hierarchy → cull → sort → draw list), the camera entity reproducing the M1 reference view-projection, the tumble matrix, and a 2 000-object scene |
+| `test_json.cpp` | M2 asset pipeline: strict JSON reader — scalars, the number grammar (leading zeros, `1.`, `+1`, `inf`/`nan`, overflow), string escapes and UTF-16 surrogate pairs, arrays, objects and duplicate keys, whitespace/BOM, depth limit, fallback getters, error offsets and line/column, a glTF-shaped document |
+| `test_base64.cpp` | M2 asset pipeline: RFC 4648 vectors both ways, all-lengths/all-byte-values round trips, MIME whitespace, malformed input (padding position/count, non-zero trailing bits), data-URI splitting and decoding |
 
 ### 4.2 Compile-checking the Android-only code on the host
 
@@ -306,7 +308,8 @@ Unreal-Engine-Mobile/
 │   │   └── gles/               OpenGL ES 3.2 fallback (post-M1)
 │   ├── renderer/               Renderer: gradient pass + scene-driven draw list
 │   ├── scene/                  M2 ECS, transform hierarchy, cameras, frustum culling
-│   ├── assets/ physics/ audio/ animation/
+│   ├── assets/                 M2 loaders: strict JSON reader, base64/data URIs (glTF next)
+│   ├── physics/ audio/ animation/
 │   ├── scripting/ ui/ net/ editor_core/     (later milestones — see each README)
 │   └── tests/                  doctest suites + CMake/CTest wiring
 ├── shaders/                    GLSL sources (compiled by tools/compile_shaders.sh)

@@ -67,6 +67,11 @@ Naming, ownership, and documentation rules are in
     │   │ Transform · SceneHierarchy│
     │   │ Camera · Frustum · Culling│
     │   └──────────────────────────┘
+    │   ┌──────────────────────────┐
+    │   │ assets (M2)              │──────────────┘ (depends on core only)
+    │   │ Json · Base64 · DataUri  │
+    │   │ glTF loader (next)       │
+    │   └──────────────────────────┘
 ┌───▼──────────────────────┐
 │ rhi                      │
 │ IDevice · ICommandBuffer │
@@ -79,10 +84,10 @@ Naming, ownership, and documentation rules are in
 
 Dependency rule: arrows point downward only. `core` depends on nothing inside
 the engine (GLM and the standard library are its only externals); `rhi` depends
-on `core`; `scene` depends on `core`; `renderer` depends on `rhi` + `scene` +
-`core` (the draw list reads the World, never the reverse); `platform` depends on
-`core`; `Engine` composes all of them. Nothing in
-`core`/`platform`/`scene`/`renderer` includes a Vulkan header — only
+on `core`; `scene` depends on `core`; `assets` depends on `core`; `renderer`
+depends on `rhi` + `scene` + `core` (the draw list reads the World, never the
+reverse); `platform` depends on `core`; `Engine` composes all of them. Nothing in
+`core`/`platform`/`scene`/`assets`/`renderer` includes a Vulkan header — only
 `rhi/vulkan/` does, which is what makes the mock-RHI tests possible.
 
 `engine/scene` holds the M2 ECS (entity handles, sparse-set component storage,
@@ -620,10 +625,10 @@ and that a failed `createShaderModule` rolls the renderer back to a clean state.
 That gives renderer-behaviour coverage with no GPU, no device, and no Vulkan
 loader.
 
-Current totals: **111 test cases, 51 448 assertions** (M0/M1 suites plus the M2
-ECS, transform-hierarchy, culling and draw-list suites), passing in both the
-plain host build and the host-check build, with zero first-party compiler
-warnings under `-Wall -Wextra -Wshadow`.
+Current totals: **132 test cases, 52 031 assertions** (M0/M1 suites plus the M2
+ECS, transform-hierarchy, culling, draw-list, JSON and base64 suites), passing in
+both the plain host build and the host-check build, with zero first-party
+compiler warnings under `-Wall -Wextra -Wshadow`.
 
 ---
 
@@ -657,7 +662,7 @@ Rules the M0/M1 code already follows, and that later milestones must keep:
 | --- | --- |
 | M2 ECS + scene | `engine/scene/` (`nova::scene`) — **ECS core landed**: `Entity`, `SparseSet`/`ComponentStorage<T>`, `World`, `View<Ts...>`. **Transform hierarchy landed**: `Transform`/`Parent`/`WorldTransform` components plus `SceneHierarchy` (CSR child lists, level-order evaluation, cycle/orphan reporting). **Cameras + culling landed**: `Camera` (perspective/orthographic, Vulkan clip space), `Frustum` (Gribb-Hartmann extraction for `[0,1]` depth), `Bounds`, `cullForCamera`, `sortFrontToBack`. **Scene-driven draw list landed**: `renderer/DrawList.h` (`MeshRef`, `DrawCommand`, `SceneSnapshot`, `buildDrawCommands`) — `Engine` owns the `World` and `Renderer::render` iterates the draw list instead of two hard-coded passes. Remaining: the frame graph, glTF/PBR assets and the GLES backend |
 | M2 frame graph | Between `Engine::frame` and `Renderer::render`: a pass graph that allocates transient attachments through `IDevice` |
-| M2 glTF/PBR | `engine/assets/` loaders → `rhi` buffers/textures; new pipelines registered by name |
+| M2 glTF/PBR | `engine/assets/` loaders → `rhi` buffers/textures; new pipelines registered by name. **Foundations landed**: strict JSON reader (`assets/Json.h`) and base64/data-URI decoding (`assets/Base64.h`), both `-fno-exceptions`-safe and fully host-tested; the glTF document model + `.glb` container read on top of them |
 | M2 GLES backend | `engine/rhi/gles/` implementing `IDevice`; `DeviceFactory` picks it when Vulkan 1.3 is unavailable |
 | M3 asset pipeline | `VirtualFileSystem` gains a cooked-cache mount; `NOVA_ENABLE_*` streaming thread |
 | M5 physics | `engine/physics/` behind `NOVA_ENABLE_PHYSICS`, stepped from `Engine::frame` with a fixed timestep |
