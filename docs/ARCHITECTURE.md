@@ -328,6 +328,7 @@ description and availability.
 | `VulkanCommon.h` | `VK_USE_PLATFORM_ANDROID_KHR`, `vkResultName`, `checkVk`, all enum translations |
 | `VulkanResources.h/.cpp` | `VulkanBuffer` (VMA), `VulkanShaderModule`, `VulkanPipeline`, `VulkanTexture` |
 | `VulkanDevice.h/.cpp` | Instance, device, VMA allocator, queues, swapchain, frame ring, descriptor pool, command recording, present |
+| `VmaImplementation.cpp` | The single TU that defines `VMA_IMPLEMENTATION` (see *Android link constraints*) |
 | `../DeviceFactory.cpp` | Creates the device when `NOVA_VULKAN_COMPILED` is set |
 
 Instance/device setup:
@@ -366,8 +367,45 @@ Swapchain:
   and `ANativeWindow` immediately.
 
 Frame ring (`kMaxFramesInFlight = 2`): per-frame command pool, command buffer,
-fence, and `imagesInFlight` semaphore tracking; acquire → record → `vkQueueSubmit2`
-→ present, with the fence waited at the *start* of the frame that reuses the slot.
+fence, and `imagesInFlight` semaphore tracking; acquire → record →
+`vkQueueSubmit2` (through a resolved function pointer, below) → present, with the
+fence waited at the *start* of the frame that reuses the slot.
+
+### Android link constraints (both cost a red CI run)
+
+Two rules apply to any code that ships inside `libnova.so` and are invisible to a
+host build, so they are worth recording rather than rediscovering:
+
+1. **A vendored single-header library needs its own implementation TU.** VMA's
+   `vmaCreateAllocator`, `vmaCreateBuffer`, … exist only after some TU defines
+   `VMA_IMPLEMENTATION`; nothing did, and `engine/rhi/vulkan/VmaImplementation.cpp`
+   is that TU. It builds with `VMA_STATIC_VULKAN_FUNCTIONS 0` and
+   `VMA_DYNAMIC_VULKAN_FUNCTIONS 1` so VMA itself resolves entry points through
+   `vkGetInstanceProcAddr`/`vkGetDeviceProcAddr` instead of referencing symbols
+   the platform loader may not export, and with `VMA_VULKAN_VERSION 1003000` to
+   match `VmaAllocatorCreateInfo::vulkanApiVersion`. A missing implementation
+   went unnoticed for weeks on the host because `nova_engine` is a **static**
+   library — its objects are pulled in only when referenced, and no host test
+   references the Vulkan backend — while the host-check JNI target is an `OBJECT`
+   library. The NDK links a **shared** library with `-Wl,--no-undefined`, so it
+   fails immediately. Treat "the host links" as no evidence about the device link.
+
+2. **Vulkan 1.3 entry points must be fetched, not linked.** Android's
+   `libvulkan.so` exports only what its API level supports: the synchronization2
+   and dynamic-rendering entry points (`vkQueueSubmit2`, `vkCmdPipelineBarrier2`,
+   `vkCmdBeginRendering`, `vkCmdEndRendering`) appear at **API 33**, while
+   `minSdk` is **31**. Referencing them directly yields
+   `ld.lld: error: undefined symbol: vkQueueSubmit2` for the arm64 link. The
+   backend therefore resolves them once, immediately after `vkCreateDevice`, into
+   a `Vulkan13EntryPoints` struct owned by the device; the command recorder holds
+   a pointer to it and calls through it. `vkGetDeviceProcAddr` is exported at
+   every level, and the Android loader forwards these names to the driver, so one
+   binary stays installable across API 31–35: a driver that implements Vulkan 1.3
+   (or the `KHR_dynamic_rendering` / `KHR_synchronization2` extensions the entry
+   points were promoted from) resolves them, and a driver that does not fails
+   device creation with an explicit log line instead of recording into a null
+   pointer. Raising `minSdk` to 33 was rejected — it would exclude a large share
+   of the install base for no code-quality benefit.
 
 Descriptor management: one `VkDescriptorSetLayout` (`set = 0`, single
 **non-dynamic** UBO binding, `VERTEX|FRAGMENT` stage flags) and a pool sized
