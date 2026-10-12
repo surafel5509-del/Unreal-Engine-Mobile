@@ -48,6 +48,7 @@ if(NOVA_ENABLE_RHI_VULKAN AND (ANDROID OR NOVA_HOST_CHECK))
     list(APPEND NOVA_RHI_SOURCES
         rhi/vulkan/VulkanDevice.cpp
         rhi/vulkan/VulkanResources.cpp
+        rhi/vulkan/VmaImplementation.cpp
     )
     set(NOVA_VULKAN_COMPILED ON)
 endif()

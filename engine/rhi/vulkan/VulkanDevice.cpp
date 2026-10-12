@@ -55,6 +55,56 @@ private:
     u32 m_height = 0;
 };
 
+/// Vulkan 1.3 entry points resolved at runtime instead of linked directly.
+///
+/// Android's `libvulkan.so` exports only what the platform API level supports:
+/// `vkQueueSubmit2` / `vkCmdPipelineBarrier2` (synchronization2) and
+/// `vkCmdBeginRendering` / `vkCmdEndRendering` (dynamic rendering) arrive at
+/// API 33, while this app's minSdk is 31. Referencing the symbols directly makes
+/// the arm64 link fail with `ld.lld: error: undefined symbol: vkQueueSubmit2`,
+/// so they are fetched through `vkGetDeviceProcAddr` — the Android loader
+/// forwards those names to the driver, which resolves them whenever it
+/// implements Vulkan 1.3 or the KHR_dynamic_rendering / KHR_synchronization2
+/// extensions they were promoted from.
+///
+/// Thread-safety: written once during logical-device creation, read-only after.
+struct Vulkan13EntryPoints {
+    PFN_vkQueueSubmit2 queueSubmit2 = nullptr;
+    PFN_vkCmdPipelineBarrier2 cmdPipelineBarrier2 = nullptr;
+    PFN_vkCmdBeginRendering cmdBeginRendering = nullptr;
+    PFN_vkCmdEndRendering cmdEndRendering = nullptr;
+
+    /// Resolve every entry point. Returns false (logging the first missing name)
+    /// when the driver does not provide Vulkan 1.3, which the caller treats as
+    /// "no usable device" rather than crashing later while recording.
+    bool load(VkDevice device) {
+        queueSubmit2 = reinterpret_cast<PFN_vkQueueSubmit2>(
+            vkGetDeviceProcAddr(device, "vkQueueSubmit2"));
+        cmdPipelineBarrier2 = reinterpret_cast<PFN_vkCmdPipelineBarrier2>(
+            vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier2"));
+        cmdBeginRendering = reinterpret_cast<PFN_vkCmdBeginRendering>(
+            vkGetDeviceProcAddr(device, "vkCmdBeginRendering"));
+        cmdEndRendering = reinterpret_cast<PFN_vkCmdEndRendering>(
+            vkGetDeviceProcAddr(device, "vkCmdEndRendering"));
+
+        if (queueSubmit2 == nullptr) {
+            NOVA_LOG_ERROR("vulkan: vkQueueSubmit2 unavailable (synchronization2 missing)");
+            return false;
+        }
+        if (cmdPipelineBarrier2 == nullptr) {
+            NOVA_LOG_ERROR("vulkan: vkCmdPipelineBarrier2 unavailable (synchronization2 missing)");
+            return false;
+        }
+        if (cmdBeginRendering == nullptr || cmdEndRendering == nullptr) {
+            NOVA_LOG_ERROR("vulkan: dynamic rendering unavailable "
+                           "(vkCmdBeginRendering/vkCmdEndRendering missing)");
+            return false;
+        }
+        NOVA_LOG_INFO("vulkan: resolved Vulkan 1.3 entry points at runtime");
+        return true;
+    }
+};
+
 }  // namespace
 
 // =========================================================== VulkanCommandBuffer
@@ -67,8 +117,11 @@ public:
         VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     };
 
-    VulkanCommandBuffer(VkDevice device, VkCommandBuffer commands, FrameContext* frame)
-        : m_device(device), m_commands(commands), m_frame(frame) {}
+    /// `vk13` points at the device-owned entry points and must outlive this
+    /// recorder (both are owned by VulkanDevice).
+    VulkanCommandBuffer(VkDevice device, VkCommandBuffer commands, FrameContext* frame,
+                        const Vulkan13EntryPoints* vk13)
+        : m_device(device), m_commands(commands), m_frame(frame), m_vk13(vk13) {}
 
     void beginRecording() {
         m_renderPassOpen = false;
@@ -115,7 +168,7 @@ public:
             dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             dependency.imageMemoryBarrierCount = 1;
             dependency.pImageMemoryBarriers = &barrier;
-            vkCmdPipelineBarrier2(m_commands, &dependency);
+            m_vk13->cmdPipelineBarrier2(m_commands, &dependency);
         }
 
         std::array<VkRenderingAttachmentInfo, kMaxColorAttachments> colors{};
@@ -141,7 +194,7 @@ public:
         renderingInfo.colorAttachmentCount = attachmentCount;
         renderingInfo.pColorAttachments = colors.data();
 
-        vkCmdBeginRendering(m_commands, &renderingInfo);
+        m_vk13->cmdBeginRendering(m_commands, &renderingInfo);
         m_renderPassOpen = true;
         m_lastColorTexture = static_cast<VulkanTextureBase*>(colorAttachments[0].texture);
         setViewportScissor(width, height);
@@ -149,7 +202,7 @@ public:
 
     void endRendering() override {
         NOVA_ENSURE(m_renderPassOpen, "endRendering without beginRendering");
-        vkCmdEndRendering(m_commands);
+        m_vk13->cmdEndRendering(m_commands);
         m_renderPassOpen = false;
 
         // COLOR_ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR. The present wait
@@ -176,7 +229,7 @@ public:
             dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             dependency.imageMemoryBarrierCount = 1;
             dependency.pImageMemoryBarriers = &barrier;
-            vkCmdPipelineBarrier2(m_commands, &dependency);
+            m_vk13->cmdPipelineBarrier2(m_commands, &dependency);
         }
         m_lastColorTexture = nullptr;
     }
@@ -264,6 +317,7 @@ private:
     VkDevice m_device = VK_NULL_HANDLE;
     VkCommandBuffer m_commands = VK_NULL_HANDLE;
     FrameContext* m_frame = nullptr;
+    const Vulkan13EntryPoints* m_vk13 = nullptr;
     const VulkanPipeline* m_boundPipeline = nullptr;
     VulkanTextureBase* m_lastColorTexture = nullptr;
     bool m_renderPassOpen = false;
@@ -365,6 +419,7 @@ private:
         Unique<VulkanCommandBuffer> recorder;
     };
     std::array<VulkanCommandBuffer::FrameContext, kMaxFramesInFlight> m_frameContexts{};
+    Vulkan13EntryPoints m_vk13;
     std::array<FrameObjects, kMaxFramesInFlight> m_frames{};
     std::vector<VkSemaphore> m_renderFinished;  // per swapchain image
     std::vector<VkFence> m_imagesInFlight;      // per swapchain image
@@ -679,6 +734,15 @@ bool VulkanDevice::createDevice() {
     }
     vkGetDeviceQueue(m_device, m_queueFamily, 0, &m_queue);
 
+    if (!m_vk13.load(m_device)) {
+        // The physical device was already filtered on Vulkan 1.3 + dynamic
+        // rendering + synchronization2, so this means the platform loader does
+        // not expose the entry points (Android below API 33 with a driver that
+        // lacks the promoted KHR extensions). Fail the device instead of
+        // recording into a null pointer later.
+        return false;
+    }
+
     VmaVulkanFunctions vmaFunctions{};
     vmaFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
     vmaFunctions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
@@ -765,7 +829,7 @@ bool VulkanDevice::createFrameObjects() {
         m_frameContexts[i] = {m_uboSetLayout, frame.descriptorPool};
         frame.recorder =
             makeUnique<VulkanCommandBuffer>(m_device, frame.commandBuffer,
-                                            &m_frameContexts[i]);
+                                            &m_frameContexts[i], &m_vk13);
         char name[48];
         std::snprintf(name, sizeof(name), "nova.frame%u.cmd", i);
         setDebugName(VK_OBJECT_TYPE_COMMAND_BUFFER,
@@ -1232,7 +1296,7 @@ void VulkanDevice::endFrame() {
     submitInfo.pSignalSemaphoreInfos = &signalInfo;
 
     vkResetFences(m_device, 1, &frame.inFlight);
-    const VkResult submitResult = vkQueueSubmit2(m_queue, 1, &submitInfo, frame.inFlight);
+    const VkResult submitResult = m_vk13.queueSubmit2(m_queue, 1, &submitInfo, frame.inFlight);
     if (!vkutil::checkVk(submitResult, "vkQueueSubmit2")) {
         if (submitResult == VK_ERROR_DEVICE_LOST) m_deviceLost = true;
         return;
