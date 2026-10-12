@@ -22,6 +22,7 @@
 #include <android/asset_manager_jni.h>
 #include <android/log.h>
 #include <android/native_window.h>
+#include <android/native_window_jni.h>  // ANativeWindow_fromSurface
 
 #if defined(__ANDROID__)
 #include <sys/system_properties.h>

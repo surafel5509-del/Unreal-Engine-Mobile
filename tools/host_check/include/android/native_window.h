@@ -21,7 +21,8 @@ enum {
     NATIVE_WINDOW_SET_BUFFER_COUNT = 3,
 };
 
-ANativeWindow* ANativeWindow_fromSurface(JNIEnv* env, jobject surface);
+// Note: ANativeWindow_fromSurface lives in <android/native_window_jni.h> in the
+// real NDK, so it is declared there in the shim too.
 void ANativeWindow_acquire(ANativeWindow* window);
 void ANativeWindow_release(ANativeWindow* window);
 int32_t ANativeWindow_getWidth(ANativeWindow* window);

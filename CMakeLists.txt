@@ -54,7 +54,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-if(NOVA_ENABLE_LTO)
+# CMake's IPO probe is skipped when cross-compiling for Android: it try-compiles
+# with -flto and the GNU gold plugin, which drives the *host* ld.gold against
+# NDK ARM objects ("unsupported ELF machine number", missing LLVMgold.so) and
+# fails. The NDK links with lld, which handles LTO through the toolchain file, so
+# Android release builds opt in via Gradle instead of this knob.
+if(NOVA_ENABLE_LTO AND NOT ANDROID)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT nova_ipo_ok OUTPUT nova_ipo_msg)
     if(nova_ipo_ok)
