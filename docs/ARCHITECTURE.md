@@ -393,19 +393,27 @@ host build, so they are worth recording rather than rediscovering:
 2. **Vulkan 1.3 entry points must be fetched, not linked.** Android's
    `libvulkan.so` exports only what its API level supports: the synchronization2
    and dynamic-rendering entry points (`vkQueueSubmit2`, `vkCmdPipelineBarrier2`,
-   `vkCmdBeginRendering`, `vkCmdEndRendering`) appear at **API 33**, while
-   `minSdk` is **31**. Referencing them directly yields
+   `vkCmdBeginRendering`, `vkCmdEndRendering`) appear at **API 33**, while the
+   app installs from **API 26** (`minSdk` 26). Referencing them directly yields
    `ld.lld: error: undefined symbol: vkQueueSubmit2` for the arm64 link. The
    backend therefore resolves them once, immediately after `vkCreateDevice`, into
    a `Vulkan13EntryPoints` struct owned by the device; the command recorder holds
    a pointer to it and calls through it. `vkGetDeviceProcAddr` is exported at
    every level, and the Android loader forwards these names to the driver, so one
-   binary stays installable across API 31–35: a driver that implements Vulkan 1.3
+   binary stays installable across API 26–35: a driver that implements Vulkan 1.3
    (or the `KHR_dynamic_rendering` / `KHR_synchronization2` extensions the entry
    points were promoted from) resolves them, and a driver that does not fails
    device creation with an explicit log line instead of recording into a null
    pointer. Raising `minSdk` to 33 was rejected — it would exclude a large share
-   of the install base for no code-quality benefit.
+   of the install base for no code-quality benefit — and the install floor was
+   later *lowered* to 26 (Android 8.0): Vulkan 1.3 is a runtime capability, not an
+   install filter (`uses-feature required="false"`), so old devices install, fail
+   device selection with a logged reason, and `MainActivity.showInitFailure`
+   explains it on screen until the GLES 3.2 backend gives them a renderer. The
+   instance request is likewise clamped to the loader's own version
+   (`vkEnumerateInstanceVersion`, absent on pre-1.1 loaders), because pre-1.1
+   loaders reject a too-new `apiVersion` with `VK_ERROR_INCOMPATIBLE_DRIVER` and
+   would mask the device-capability story.
 
 Descriptor management: one `VkDescriptorSetLayout` (`set = 0`, single
 **non-dynamic** UBO binding, `VERTEX|FRAGMENT` stage flags) and a pool sized

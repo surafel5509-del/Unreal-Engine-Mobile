@@ -173,7 +173,7 @@ jobs:
           gh release create apk-latest \
             --target "$GITHUB_SHA" \
             --title "Nova Engine debug APK (latest)" \
-            --notes "Republished automatically by every successful android-apk run. arm64-v8a, minSdk 31 (Android 12 or newer). Install with: adb install -r nova-engine-debug.apk" \
+            --notes "Republished automatically by every successful android-apk run. arm64-v8a, minSdk 26 (Android 8.0 or newer). The Vulkan 1.3 renderer activates only where a Vulkan 1.3 driver exists; older devices show an explanatory dialog. Install with: adb install -r nova-engine-debug.apk" \
             --prerelease \
             dist/nova-engine-debug.apk
           echo "Direct download: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/nova-engine-debug.apk" \

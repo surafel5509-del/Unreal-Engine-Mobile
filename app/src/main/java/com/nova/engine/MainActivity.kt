@@ -1,10 +1,15 @@
 package com.nova.engine
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
+import android.util.DisplayMetrics
 import android.util.Log
 import android.view.KeyEvent
 import android.view.Surface
+import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
@@ -20,8 +25,14 @@ import com.nova.engine.runtime.NovaRuntime
  *  - forward key/gamepad input to [InputManager].
  *
  * No runtime permissions are requested: the engine only reads its own APK
- * assets and writes to app-private storage (both permission-free on API 31+).
+ * assets and writes to app-private storage (both permission-free on API 26+).
  * See docs/ARCHITECTURE.md for the threading model.
+ *
+ * `minSdk` is 26 (Android 8.0). Every API added after that which this activity
+ * uses (`WindowInsetsController`, `setDecorFitsSystemWindows`,
+ * `getCurrentWindowMetrics`) is gated behind [Build.VERSION] checks with a
+ * pre-API-30 fallback, and a device whose driver lacks Vulkan 1.3 gets an
+ * explanatory dialog from [showInitFailure] instead of a silent exit.
  */
 class MainActivity : Activity() {
 
@@ -44,7 +55,7 @@ class MainActivity : Activity() {
         hideSystemBars()
 
         val dataPath = NovaAssetManager.prepare(this)
-        val bounds = windowManager.currentWindowMetrics.bounds
+        val bounds = windowBounds()
         val initResult = NativeBridge.nativeInit(
             assets,
             dataPath.absolutePath,
@@ -54,7 +65,7 @@ class MainActivity : Activity() {
         )
         if (initResult != 0) {
             Log.e(TAG, "Native engine init failed with code $initResult")
-            finish()
+            showInitFailure(initResult)
             return
         }
         nativeAlive = true
@@ -120,11 +131,58 @@ class MainActivity : Activity() {
 
     /** Edge-to-edge immersive mode with swipe-in transient bars. */
     private fun hideSystemBars() {
-        window.setDecorFitsSystemWindows(false)
-        window.insetsController?.let { controller ->
-            controller.hide(WindowInsets.Type.systemBars())
-            controller.systemBarsBehavior =
-                WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { controller ->
+                controller.hide(WindowInsets.Type.systemBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            // Android 8-10: the insets-controller API does not exist yet; the
+            // deprecated visibility flags are the only immersive mode there.
+            @Suppress("DEPRECATION")
+            run {
+                window.decorView.systemUiVisibility =
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_SWIPE or
+                        View.SYSTEM_UI_FLAG_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            }
         }
+    }
+
+    /** Window size in pixels; [WindowManager.getCurrentWindowMetrics] is API 30+. */
+    private fun windowBounds(): Rect =
+        if (Build.VERSION.SDK_INT >= 30) {
+            windowManager.currentWindowMetrics.bounds
+        } else {
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getRealMetrics(metrics)
+            Rect(0, 0, metrics.widthPixels, metrics.heightPixels)
+        }
+
+    /**
+     * Explain a failed native init on screen instead of closing silently: with
+     * `minSdk` 26 the common cause is a device whose driver offers no Vulkan 1.3
+     * renderer, which is a device capability, not a crash.
+     */
+    private fun showInitFailure(code: Int) {
+        val detail = when (code) {
+            2 -> "This device offers no Vulkan 1.3 renderer. The engine needs a " +
+                "Vulkan 1.3 driver (Android 12 or newer with up-to-date GPU " +
+                "drivers); the GLES 3.2 fallback backend for older devices " +
+                "arrives in a later milestone."
+            else -> "Check logcat (tags NovaMain / nova) for the detailed reason."
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Nova Engine cannot start")
+            .setMessage("Engine initialization failed (error $code). $detail")
+            .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
+            .setOnDismissListener { finish() }
+            .show()
     }
 }

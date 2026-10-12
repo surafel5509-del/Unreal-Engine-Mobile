@@ -60,7 +60,8 @@ private:
 /// Android's `libvulkan.so` exports only what the platform API level supports:
 /// `vkQueueSubmit2` / `vkCmdPipelineBarrier2` (synchronization2) and
 /// `vkCmdBeginRendering` / `vkCmdEndRendering` (dynamic rendering) arrive at
-/// API 33, while this app's minSdk is 31. Referencing the symbols directly makes
+/// API 33, while the app installs from API 26 (minSdk 26). Referencing the
+/// symbols directly makes
 /// the arm64 link fail with `ld.lld: error: undefined symbol: vkQueueSubmit2`,
 /// so they are fetched through `vkGetDeviceProcAddr` — the Android loader
 /// forwards those names to the driver, which resolves them whenever it
@@ -607,7 +608,23 @@ bool VulkanDevice::createInstance(const DeviceDesc& desc) {
     appInfo.applicationVersion = VK_MAKE_VERSION(0, 1, 0);
     appInfo.pEngineName = "NovaEngine";
     appInfo.engineVersion = VK_MAKE_VERSION(0, 1, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_3;
+    // Ask for Vulkan 1.3, but never for more than the platform loader
+    // implements. Pre-1.1 loaders (Android 8/9, minSdk is 26) reject a newer
+    // request outright with VK_ERROR_INCOMPATIBLE_DRIVER, which would bury the
+    // real reason on old platforms — "no Vulkan 1.3 device" — under a
+    // loader-level error. Clamping keeps every failure below this line in
+    // device-selection territory, where the log explains the capability gap.
+    u32 loaderApiVersion = VK_API_VERSION_1_0;
+    auto enumerateInstanceVersion = reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
+        vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion"));
+    if (enumerateInstanceVersion != nullptr) {
+        u32 supported = 0;
+        if (enumerateInstanceVersion(&supported) == VK_SUCCESS && supported != 0) {
+            loaderApiVersion = supported;
+        }
+    }
+    appInfo.apiVersion =
+        loaderApiVersion < VK_API_VERSION_1_3 ? loaderApiVersion : VK_API_VERSION_1_3;
 
     std::vector<const char*> layers;
     if (m_validationEnabled) {
@@ -625,8 +642,9 @@ bool VulkanDevice::createInstance(const DeviceDesc& desc) {
     const VkResult result = vkCreateInstance(&createInfo, nullptr, &m_instance);
     if (result == VK_ERROR_INCOMPATIBLE_DRIVER) {
         NOVA_LOG_ERROR(
-            "vulkan: loader rejected API 1.3 — Nova Engine M1 requires a Vulkan 1.3 "
-            "device (Android 12+ with up-to-date GPU drivers)");
+            "vulkan: the platform loader rejected instance creation "
+            "(VK_ERROR_INCOMPATIBLE_DRIVER) — no usable Vulkan driver on this "
+            "device; Nova Engine needs a Vulkan 1.3-capable driver");
         return false;
     }
     if (!vkutil::checkVk(result, "vkCreateInstance")) {

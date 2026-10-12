@@ -71,7 +71,7 @@ Engine console (reachable from Kotlin via `NativeBridge.nativeExecConsole`):
 | Android Gradle Plugin | 8.5.2 | Pinned in `build.gradle.kts` |
 | Gradle | 8.7 | Wrapper included — do not install separately |
 | Kotlin | 1.9.24 | Pinned in `build.gradle.kts` |
-| Android SDK | compile/target 34, min 31 | Android 12 is the minimum OS |
+| Android SDK | compile/target 34, min 26 | Installs on Android 8.0+; the Vulkan 1.3 renderer activates only on Vulkan 1.3 devices |
 | NDK | 26.3.11579264 | Pinned via `ndkVersion` |
 | CMake | 3.22.1 | Installed through the SDK manager |
 | Device | arm64-v8a, **Vulkan 1.3** | Physical device recommended |
@@ -290,11 +290,13 @@ has three causes, in order of likelihood:
    Use the release link above, or unzip the artifact first.
 2. The download was truncated (flaky mobile connection). Compare the file size
    against the asset size shown on the release page, or re-download over `adb`.
-3. The device runs **Android 11 or older**. `minSdk` is 31 (Android 12) because
-   the Vulkan backend targets Vulkan 1.3; check with
-   `adb shell getprop ro.build.version.sdk`. On such a device the GLES 3.2
-   fallback backend (a later milestone) is the intended path, not a lower
-   `minSdk`.
+3. The device runs **Android 7.1 or older**, or the file predates the minSdk-26
+   builds. `minSdk` is 26 (Android 8.0); check the device with
+   `adb shell getprop ro.build.version.sdk`. From Android 8.0 up the package
+   always *installs*; a device whose driver lacks Vulkan 1.3 then starts the
+   app and shows an explanatory dialog ("This device offers no Vulkan 1.3
+   renderer") instead of rendering, until the GLES 3.2 fallback backend lands
+   in a later milestone.
 
 The runner has no `glslangValidator`, so `:app:compileShaders` skips itself
 (`nova.compileShaders=auto`) and the APK ships the checked-in `.spv` files —
