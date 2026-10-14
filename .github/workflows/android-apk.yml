@@ -92,6 +92,9 @@ jobs:
           set -o pipefail
           ./gradlew :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee gradle-build.log
 
+      - name: Check Android API compatibility
+        run: ./gradlew :app:lintDebug --no-daemon --stacktrace
+
       - name: Surface build errors
         # Runner logs are only visible in the web UI, so re-publish the first
         # Gradle/Kotlin/CMake diagnostics as check annotations (visible on the
@@ -116,7 +119,10 @@ jobs:
           # The native engine library and the SPIR-V assets must be packaged,
           # otherwise the app would install and fail at load time.
           unzip -l "$APK" | grep -E "lib/arm64-v8a/libnova\.so" || { echo "libnova.so missing from the APK" >&2; exit 1; }
-          unzip -l "$APK" | grep -E "assets/shaders/.*\.spv" || { echo "compiled shaders missing from the APK" >&2; exit 1; }
+          for shader in background.vert background.frag triangle.vert triangle.frag; do
+            unzip -p "$APK" "assets/shaders/$shader.spv" > "$RUNNER_TEMP/$shader.spv"
+            test -s "$RUNNER_TEMP/$shader.spv"
+          done
           unzip -l "$APK" | grep -E "classes\.dex" || { echo "no dex in the APK" >&2; exit 1; }
           echo "apk_path=$APK" >> "$GITHUB_ENV"
 
@@ -131,10 +137,13 @@ jobs:
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           BT="$SDK/build-tools/34.0.0"
           APK="${{ env.apk_path }}"
+          "$BT/aapt" dump badging "$APK" > apk-badging.log
+          grep -qx "sdkVersion:'24'" apk-badging.log || { echo "APK must declare minSdk 24" >&2; exit 1; }
+          grep -qx "native-code:'arm64-v8a'" apk-badging.log || { echo "Unexpected APK ABI" >&2; exit 1; }
           {
             echo "## APK verification (apksigner / zipalign / aapt)"
             echo '```'
-            "$BT/apksigner" verify --verbose --print-certs "$APK"
+            "$BT/apksigner" verify --min-sdk-version 24 --verbose --print-certs "$APK"
             if "$BT/zipalign" -c 4 "$APK"; then
               echo "zipalign -c 4: OK (4-byte aligned)"
             else
@@ -151,16 +160,21 @@ jobs:
           # Stable name for the artifact and the release asset.
           mkdir -p dist
           cp "$APK" dist/nova-engine-debug.apk
+          (cd dist && sha256sum nova-engine-debug.apk > nova-engine-debug.apk.sha256)
+          cat dist/nova-engine-debug.apk.sha256 >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: nova-engine-debug-apk
-          path: dist/nova-engine-debug.apk
+          path: |
+            dist/nova-engine-debug.apk
+            dist/nova-engine-debug.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
       - name: Publish apk-latest release (direct .apk download)
+        if: github.event_name != 'pull_request'
         # GitHub artifacts always download as a .zip; installing that zip (or a
         # renamed copy of it) is the classic cause of the parse-error dialog on
         # the device. A release asset downloads as the bare APK, so every green
@@ -173,9 +187,9 @@ jobs:
           gh release create apk-latest \
             --target "$GITHUB_SHA" \
             --title "Nova Engine debug APK (latest)" \
-            --notes "Republished automatically by every successful android-apk run. arm64-v8a, minSdk 26 (Android 8.0 or newer). The Vulkan 1.3 renderer activates only where a Vulkan 1.3 driver exists; older devices show an explanatory dialog. Install with: adb install -r nova-engine-debug.apk" \
+            --notes "Republished automatically by successful branch builds. Commit: $GITHUB_SHA. arm64-v8a, minSdk 24 (Android 7.0 or newer). The Vulkan 1.3 renderer activates only where a Vulkan 1.3 driver exists; older devices show an explanatory dialog. Install with: adb install -r nova-engine-debug.apk" \
             --prerelease \
-            dist/nova-engine-debug.apk
+            dist/nova-engine-debug.apk dist/nova-engine-debug.apk.sha256
           echo "Direct download: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/nova-engine-debug.apk" \
             >> "$GITHUB_STEP_SUMMARY"
 
@@ -185,6 +199,10 @@ jobs:
         with:
           name: android-build-logs
           path: |
+            gradle-build.log
+            apk-verify.log
+            apk-badging.log
+            app/build/reports/lint-results-debug.*
             app/.cxx/**/*.txt
             app/build/outputs/logs/**
           if-no-files-found: ignore

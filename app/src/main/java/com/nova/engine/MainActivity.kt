@@ -25,10 +25,10 @@ import com.nova.engine.runtime.NovaRuntime
  *  - forward key/gamepad input to [InputManager].
  *
  * No runtime permissions are requested: the engine only reads its own APK
- * assets and writes to app-private storage (both permission-free on API 26+).
+ * assets and writes to app-private storage (both permission-free on API 24+).
  * See docs/ARCHITECTURE.md for the threading model.
  *
- * `minSdk` is 26 (Android 8.0). Every API added after that which this activity
+ * `minSdk` is 24 (Android 7.0). Every API added after that which this activity
  * uses (`WindowInsetsController`, `setDecorFitsSystemWindows`,
  * `getCurrentWindowMetrics`) is gated behind [Build.VERSION] checks with a
  * pre-API-30 fallback, and a device whose driver lacks Vulkan 1.3 gets an
@@ -139,7 +139,7 @@ class MainActivity : Activity() {
                     WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         } else {
-            // Android 8-10: the insets-controller API does not exist yet; the
+            // Android 7-10: the insets-controller API does not exist yet; the
             // deprecated visibility flags are the only immersive mode there.
             // IMMERSIVE_STICKY (transient bars on swipe) is the pre-30
             // equivalent of BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE; the
@@ -170,7 +170,7 @@ class MainActivity : Activity() {
 
     /**
      * Explain a failed native init on screen instead of closing silently: with
-     * `minSdk` 26 the common cause is a device whose driver offers no Vulkan 1.3
+     * `minSdk` 24 the common cause is a device whose driver offers no Vulkan 1.3
      * renderer, which is a device capability, not a crash.
      */
     private fun showInitFailure(code: Int) {

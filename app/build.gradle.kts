@@ -24,15 +24,15 @@ android {
 
     defaultConfig {
         applicationId = "com.nova.engine"
-        // Android 8.0. The Vulkan 1.3 renderer self-selects at runtime: a
+        // Android 7.0. The Vulkan 1.3 renderer self-selects at runtime: a
         // device whose driver lacks Vulkan 1.3 fails device creation, and
         // MainActivity.showInitFailure explains that on screen instead of the
         // installer rejecting the package. The GLES 3.2 fallback backend for
         // such devices is a later milestone (see docs/MILESTONES.md).
-        minSdk = 26
+        minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
 
         externalNativeBuild {
             cmake {

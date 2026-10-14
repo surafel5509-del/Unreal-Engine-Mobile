@@ -60,7 +60,7 @@ private:
 /// Android's `libvulkan.so` exports only what the platform API level supports:
 /// `vkQueueSubmit2` / `vkCmdPipelineBarrier2` (synchronization2) and
 /// `vkCmdBeginRendering` / `vkCmdEndRendering` (dynamic rendering) arrive at
-/// API 33, while the app installs from API 26 (minSdk 26). Referencing the
+/// API 33, while the app installs from API 24 (minSdk 24). Referencing the
 /// symbols directly makes
 /// the arm64 link fail with `ld.lld: error: undefined symbol: vkQueueSubmit2`,
 /// so they are fetched through `vkGetDeviceProcAddr` — the Android loader
@@ -383,7 +383,7 @@ private:
     VkInstance m_instance = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
     PFN_vkSetDebugUtilsObjectNameEXT m_setObjectName = nullptr;
-    /// Vulkan 1.1 core, so the API-26/27 loader does not export it; resolved in
+    /// Vulkan 1.1 core, so the API-24–27 loader does not export it; resolved in
     /// createInstance with a KHR-alias fallback (see Android link constraints).
     PFN_vkGetPhysicalDeviceFeatures2 m_getPhysicalDeviceFeatures2 = nullptr;
     bool m_validationEnabled = false;
@@ -612,7 +612,7 @@ bool VulkanDevice::createInstance(const DeviceDesc& desc) {
     appInfo.pEngineName = "NovaEngine";
     appInfo.engineVersion = VK_MAKE_VERSION(0, 1, 0);
     // Ask for Vulkan 1.3, but never for more than the platform loader
-    // implements. Pre-1.1 loaders (Android 8/9, minSdk is 26) reject a newer
+    // implements. Pre-1.1 loaders (Android 7/8, minSdk is 24) reject a newer
     // request outright with VK_ERROR_INCOMPATIBLE_DRIVER, which would bury the
     // real reason on old platforms — "no Vulkan 1.3 device" — under a
     // loader-level error. Clamping keeps every failure below this line in
@@ -673,7 +673,7 @@ bool VulkanDevice::createInstance(const DeviceDesc& desc) {
     }
 
     // vkGetPhysicalDeviceFeatures2 is Vulkan 1.1 core: the Android loader
-    // exports it only from API 28, while the package installs from API 26 and
+    // exports it only from API 28, while the package installs from API 24 and
     // the NDK links against the minSdk stub libvulkan.so, so a direct call is
     // an undefined symbol at link time. Resolve it (core name first, then the
     // KHR alias the promotion came from, which 1.0-era drivers do export);
