@@ -74,7 +74,7 @@ Engine console (reachable from Kotlin via `NativeBridge.nativeExecConsole`):
 | Android SDK | compile/target 34, min 24 | Installs on Android 7.0+; the Vulkan 1.3 renderer activates only on Vulkan 1.3 devices |
 | NDK | 26.3.11579264 | Pinned via `ndkVersion` |
 | CMake | 3.22.1 | Installed through the SDK manager |
-| Device | arm64-v8a, **Vulkan 1.3** | Physical device recommended |
+| Device | 32-bit or 64-bit ARM Android; **Vulkan 1.3** for rendering | Physical device recommended |
 
 The Vulkan 1.3 requirement is real, not nominal: the renderer uses core
 dynamic rendering and synchronization2 instead of the deprecated
@@ -152,7 +152,7 @@ On Windows use `gradlew.bat` instead of `./gradlew`.
 
 | Property | Default | Effect |
 | --- | --- | --- |
-| `nova.abiFilters` | `arm64-v8a` | Comma-separated ABI list |
+| `nova.abiFilters` | `arm64-v8a,armeabi-v7a` | Comma-separated ABI list |
 | `nova.validation` | `true` | Vulkan validation layer in **debug** builds (release is always `false`) |
 | `nova.compileShaders` | `auto` | `auto` = use glslang if found, else keep checked-in `.spv`; `on` = fail without a compiler; `off` = always use checked-in `.spv` |
 | `nova.glslang` | *(unset)* | Absolute path to `glslangValidator` / `glslang` / `glslc` |

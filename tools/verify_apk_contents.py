@@ -6,7 +6,8 @@ import zipfile
 
 # ELF class and e_machine for each Android ABI (little-endian ELF).
 ARM_ABIS = {"arm64-v8a": (2, 183), "armeabi-v7a": (1, 40)}
-LIBRARIES = ("libnova.so", "libc++_shared.so")
+# The project uses CMake/NDK's default static C++ runtime.
+LIBRARIES = ("libnova.so",)
 
 
 def verify_apk(path):
@@ -15,7 +16,10 @@ def verify_apk(path):
         if bad_entry:
             raise ValueError(f"APK CRC mismatch: {bad_entry}")
         for abi, (elf_class, machine) in ARM_ABIS.items():
-            for library in LIBRARIES:
+            libraries = list(LIBRARIES)
+            if f"lib/{abi}/libc++_shared.so" in apk.namelist():
+                libraries.append("libc++_shared.so")
+            for library in libraries:
                 name = f"lib/{abi}/{library}"
                 try:
                     with apk.open(name) as entry:
@@ -35,4 +39,4 @@ if __name__ == "__main__":
     try:
         verify_apk(sys.argv[1])
     except (ValueError, OSError, zipfile.BadZipFile) as error:
-        sys.exit(f"APK verification failed: {error}")
+        sys.exit(f"::error title=APK contents::APK verification failed: {error}")
