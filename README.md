@@ -259,7 +259,7 @@ Two GitHub Actions workflows run on every push and pull request:
 | Workflow | File | What it proves |
 | --- | --- | --- |
 | `host-build` | [.github/workflows/host-build.yml](.github/workflows/host-build.yml) | Unit tests on gcc, clang **and** clang+libc++ (`build/host`) — the last one reproduces the standard library the Android NDK builds against, so device-only breaks fail on the host in seconds. A separate job compile-checks the Android-only sources (JNI bridge, Vulkan backend, `AAssetManager`/`ANativeWindow`) against the shims in `tools/host_check` (`build/host-check`). Zero first-party warnings; compiler errors are re-published as check annotations. |
-| `android-apk` | [.github/workflows/android-apk.yml](.github/workflows/android-apk.yml) | The real device build path: JDK 17 + AGP 8.5.2 + Gradle 8.7 wrapper + NDK `26.3.11579264` + CMake `3.22.1` produce `app-debug.apk` for `arm64-v8a`. The APK is inspected (`libnova.so`, `assets/shaders/*.spv`, `classes.dex`) and uploaded as the **`nova-engine-debug-apk`** artifact. |
+| `android-apk` | [.github/workflows/android-apk.yml](.github/workflows/android-apk.yml) | The real device build path: JDK 17 + AGP 8.5.2 + Gradle 8.7 wrapper + NDK `26.3.11579264` + CMake `3.22.1` produce `app-debug.apk` for both `arm64-v8a` and `armeabi-v7a` in one APK. The APK is inspected (`libnova.so`, `assets/shaders/*.spv`, `classes.dex`) and uploaded as the **`nova-engine-debug-apk`** artifact. |
 
 Every successful branch build republishes the APK as a **release asset**, which downloads
 as the bare `.apk` (no zip wrapper) — the easiest route from a phone browser or
@@ -278,7 +278,7 @@ adb install -r nova-engine-debug.apk
 
 Each run also verifies the package before publishing it: `apksigner verify
 --verbose --print-certs` (v2/v3 signature schemes), `zipalign -c 4`, and
-`aapt dump badging` (asserting `sdkVersion:24` and `arm64-v8a`). Android lint
+`aapt dump badging` (asserting `sdkVersion:24` and both ARM ABIs). Android lint
 checks API compatibility, and a `.sha256` checksum accompanies the APK. The output is
 posted to the job summary and as `apk-verify` check annotations.
 
@@ -293,7 +293,7 @@ has three causes, in order of likelihood:
    against the asset size shown on the release page, or re-download over `adb`.
 3. The device runs **Android 6.0 or older**, or the file predates the minSdk-24
    builds. `minSdk` is 24 (Android 7.0); check the device with
-   `adb shell getprop ro.build.version.sdk`. On Android 7.0+ with a 64-bit ARM OS, the package
+   `adb shell getprop ro.build.version.sdk`. On Android 7.0+ with a 32-bit or 64-bit ARM OS, the package
    can be installed; a device whose driver lacks Vulkan 1.3 then starts the
    app and shows an explanatory dialog ("This device offers no Vulkan 1.3
    renderer") instead of rendering, until the GLES 3.2 fallback backend lands
@@ -302,9 +302,34 @@ has three causes, in order of likelihood:
 **Updates:** this is a debug-signed demo APK, not a production release. If Android
 reports `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, the existing app was signed with a
 different key. Uninstall it before installing this build (this deletes app data).
-32-bit-only phones/Android installations are not supported by this arm64 APK.
+Version 0.1.2 includes both `armeabi-v7a` (32-bit) and `arm64-v8a` (64-bit)
+native libraries. A 64-bit processor can run a 32-bit Android OS, which could
+not install the older arm64-only APK.
 Lowering the install SDK does not add a GLES renderer; Vulkan 1.3 is still needed
 to render the demo.
+
+**Troubleshooting — "App not installed."** This is a generic installer error,
+not proof of a GPU/renderer problem. Download the new APK (not the artifact ZIP).
+If it still fails, record the phone model, Android version, and the exact error
+from a computer with Android platform-tools and USB debugging enabled:
+
+```bash
+adb shell getprop ro.product.model
+adb shell getprop ro.build.version.sdk
+adb shell getprop ro.product.cpu.abilist
+adb install -r nova-engine-debug.apk
+```
+
+- `INSTALL_FAILED_NO_MATCHING_ABIS`: the APK does not contain your Android OS's
+  native ABI. Use version 0.1.2+ for 32-bit ARM; x86 devices are not supported.
+- `INSTALL_FAILED_OLDER_SDK`: this build needs Android 7.0 / API 24 or newer.
+- `INSTALL_FAILED_UPDATE_INCOMPATIBLE`: signing-key conflict; uninstalling the
+  existing app removes its data. Check other profiles/Secure Folder as well.
+- `INSTALL_FAILED_INSUFFICIENT_STORAGE`: free internal storage and retry.
+- Certificate/invalid-APK errors: re-download the original signed APK without
+  modifying/repacking it and compare its SHA-256 with the release checksum.
+
+Do not disable device security checks to work around an unexplained failure.
 
 The runner has no `glslangValidator`, so `:app:compileShaders` skips itself
 (`nova.compileShaders=auto`) and the APK ships the checked-in `.spv` files —

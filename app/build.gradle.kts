@@ -31,8 +31,8 @@ android {
         // such devices is a later milestone (see docs/MILESTONES.md).
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
 
         externalNativeBuild {
             cmake {
@@ -48,7 +48,7 @@ android {
         }
 
         ndk {
-            abiFilters += novaProp("nova.abiFilters", "arm64-v8a").split(",").map { it.trim() }
+            abiFilters += novaProp("nova.abiFilters", "arm64-v8a,armeabi-v7a").split(",").map { it.trim() }
         }
     }
 

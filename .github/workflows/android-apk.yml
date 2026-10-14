@@ -2,7 +2,7 @@ name: android-apk
 
 # Builds the runnable demo APK with the real Android toolchain — the path the
 # host workflows cannot cover: JDK 17, AGP 8.5.2, Gradle 8.7 (wrapper),
-# NDK 26.3.11579264 and CMake 3.22.1 compiling the C++20 engine for arm64-v8a,
+# NDK 26.3.11579264 and CMake 3.22.1 compiling the C++20 engine for arm64-v8a + armeabi-v7a,
 # Kotlin sources, JNI bridge, manifest and the checked-in SPIR-V assets.
 #
 # The resulting APK is uploaded as a build artifact and can be installed with:
@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   apk:
-    name: Assemble debug APK (arm64-v8a)
+    name: Assemble debug APK (32-bit + 64-bit ARM)
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -118,7 +118,8 @@ jobs:
           echo "APK: $APK ($(du -h "$APK" | cut -f1))"
           # The native engine library and the SPIR-V assets must be packaged,
           # otherwise the app would install and fail at load time.
-          unzip -l "$APK" | grep -E "lib/arm64-v8a/libnova\.so" || { echo "libnova.so missing from the APK" >&2; exit 1; }
+          python3 -m unittest discover -s tools/tests -p 'test_apk_contents.py' -v
+          python3 tools/verify_apk_contents.py "$APK"
           for shader in background.vert background.frag triangle.vert triangle.frag; do
             unzip -p "$APK" "assets/shaders/$shader.spv" > "$RUNNER_TEMP/$shader.spv"
             test -s "$RUNNER_TEMP/$shader.spv"
@@ -139,7 +140,9 @@ jobs:
           APK="${{ env.apk_path }}"
           "$BT/aapt" dump badging "$APK" > apk-badging.log
           grep -Eq "^sdkVersion:[[:space:]]*'24'[[:space:]]*$" apk-badging.log || { echo "::error::APK must declare minSdk 24"; cat apk-badging.log; exit 1; }
-          grep -Eq "^native-code:[[:space:]]*'arm64-v8a'[[:space:]]*$" apk-badging.log || { echo "::error::Unexpected APK ABI"; cat apk-badging.log; exit 1; }
+          for abi in arm64-v8a armeabi-v7a; do
+            grep '^native-code:' apk-badging.log | grep -F "'$abi'" || { echo "::error::Missing APK ABI $abi"; exit 1; }
+          done
           {
             echo "## APK verification (apksigner / zipalign / aapt)"
             echo '```'
@@ -187,7 +190,7 @@ jobs:
           gh release create apk-latest \
             --target "$GITHUB_SHA" \
             --title "Nova Engine debug APK (latest)" \
-            --notes "Republished automatically by successful branch builds. Commit: $GITHUB_SHA. arm64-v8a, minSdk 24 (Android 7.0 or newer). The Vulkan 1.3 renderer activates only where a Vulkan 1.3 driver exists; older devices show an explanatory dialog. Install with: adb install -r nova-engine-debug.apk" \
+            --notes "Republished automatically by successful branch builds. Commit: $GITHUB_SHA. Universal ARM APK (arm64-v8a + armeabi-v7a), minSdk 24 (Android 7.0 or newer). The Vulkan 1.3 renderer activates only where a Vulkan 1.3 driver exists; older devices show an explanatory dialog. Install with: adb install -r nova-engine-debug.apk" \
             --prerelease \
             dist/nova-engine-debug.apk dist/nova-engine-debug.apk.sha256
           echo "Direct download: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/nova-engine-debug.apk" \
