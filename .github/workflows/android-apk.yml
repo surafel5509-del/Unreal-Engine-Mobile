@@ -138,8 +138,8 @@ jobs:
           BT="$SDK/build-tools/34.0.0"
           APK="${{ env.apk_path }}"
           "$BT/aapt" dump badging "$APK" > apk-badging.log
-          grep -qx "sdkVersion:'24'" apk-badging.log || { echo "APK must declare minSdk 24" >&2; exit 1; }
-          grep -qx "native-code:'arm64-v8a'" apk-badging.log || { echo "Unexpected APK ABI" >&2; exit 1; }
+          grep -Eq "^sdkVersion:[[:space:]]*'24'[[:space:]]*$" apk-badging.log || { echo "::error::APK must declare minSdk 24"; cat apk-badging.log; exit 1; }
+          grep -Eq "^native-code:[[:space:]]*'arm64-v8a'[[:space:]]*$" apk-badging.log || { echo "::error::Unexpected APK ABI"; cat apk-badging.log; exit 1; }
           {
             echo "## APK verification (apksigner / zipalign / aapt)"
             echo '```'
