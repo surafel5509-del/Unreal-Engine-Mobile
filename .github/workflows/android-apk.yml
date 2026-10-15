@@ -266,6 +266,7 @@ jobs:
           path: |
             device-test.log
             device-logcat.log
+            device-errors.log
             editor-screenshot.png
 
   publish:

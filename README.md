@@ -1,25 +1,25 @@
 # Nova Engine
 
-A from-scratch, UE5-class 3D game engine for Android. Kotlin front-end,
-C++20 engine core, Vulkan 1.3 renderer (OpenGL ES 3.2 fallback planned),
-built as strictly separated modules so subsystems can be compiled in or out.
+A mobile-first C++20 game-engine foundation with a Kotlin Android scene editor.
+The default APK uses **OpenGL ES 2/3**, not Vulkan, and targets **Android 5.0+**.
+It is an early, limited editor—not Unreal Engine, Unity, or a feature-complete
+replacement for either product.
 
-```
-Kotlin (Activity, Surface, input, assets)
-        │  JNI — 10 thin entry points
-        ▼
-C++20 engine: core → platform → rhi → renderer → scene → …
-        │
-        ▼
-Vulkan 1.3 (dynamic rendering, synchronization2, VMA)
-```
+**Version 0.2.0: Nova Studio compatibility editor.**
 
-**Current status: Milestones M0 + M1 complete, M2 in progress.** The `app`
-module builds and runs a real Vulkan renderer: an animated full-screen gradient
-with a rotating, vertex-coloured triangle on top — now drawn from an ECS scene
-(hierarchy → frustum cull → front-to-back sort → draw list) rather than two
-hard-coded passes — presented at display refresh rate through a
-double-buffered FIFO/Mailbox swapchain.
+- Android 5–7 (API 21–25): OpenGL ES 2.
+- Android 8+ (API 26+): request OpenGL ES 3; retry ES 2 if unavailable.
+- ARM32, ARM64, x86 and x86_64 in one APK; no `libvulkan.so` load dependency.
+- Native ECS scene rendered through EGL: depth-tested cubes and triangles,
+  transforms, material tint, camera zoom and preview rotation.
+- Responsive hierarchy/viewport/inspector interface, built-in mesh library,
+  console, undo/redo, atomic scene save/load and background recovery save.
+
+[Editor guide and limits](docs/ANDROID_EDITOR.md) ·
+[Download the latest tested APK](https://github.com/surafel5509-del/Unreal-Engine-Mobile/releases/download/apk-latest/nova-engine-debug.apk)
+
+The Vulkan backend remains in the repository as an optional development path.
+Historical milestones below describe that work; the compatibility APK disables it.
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
@@ -37,26 +37,18 @@ See [docs/MILESTONES.md](docs/MILESTONES.md) for the roadmap and
 
 ## 1. What you see when you run it
 
-* A smooth vertical gradient (deep indigo → near black) that shifts over time,
-  drawn as a full-screen triangle.
-* A rotating triangle with per-vertex colours (violet / cyan / pink), tumbling
-  around the Y and Z axes with a projection-correct aspect ratio. Its world
-  matrix comes from the ECS scene graph: each frame `Engine` animates a
-  `Transform`, evaluates the hierarchy, frustum-culls against the camera entity,
-  sorts front-to-back and hands the resulting draw list to the renderer — so the
-  image is identical to M1's while the path through the engine is now the real
-  one.
-* Rotation follows display refresh (60 Hz and 120 Hz panels both pace correctly).
-* Touch and key events flow into the engine's platform-independent input queue
-  (`nova::platform::InputQueue`), drained once per frame.
-* Rotating the device resizes the swapchain without recreating the process
-  (`configChanges` + `nativeResize` + lazy pipeline rebuild for the new format).
-* Backgrounding pauses the render thread; the surface is only released after
-  the in-flight frame has finished, so the native window is never freed under
-  a running frame.
+A dark mobile scene editor opens with a real depth-tested cube in a grid viewport.
+On narrow screens the bottom dock switches between Hierarchy, Inspector, Assets,
+and Console. Wide layouts show hierarchy and inspector alongside the viewport.
 
-Engine console (reachable from Kotlin via `NativeBridge.nativeExecConsole`):
-`help`, `stats`, `log <msg>`, `vsync on|off`, `time`.
+Use **+ Object** or **Assets** to add cubes/triangles, select an object, edit its
+position/rotation/uniform scale, apply a color tint, or drag it in the viewport.
+**Play/Stop** previews rotation without changing authored transforms. **Undo/Redo**
+keeps 30 edit snapshots. **Save/Load** uses app-private JSON; backgrounding saves a
+separate recovery document. This release supports at most 32 objects per scene.
+
+Console commands: `help`, `stats`, `graphics`, `play`, `stop`, `camera <1.5..20>`,
+`log <message>`, `time`. GLES uses FIFO pacing with an approximately 60 FPS cap.
 
 ---
 
@@ -71,19 +63,14 @@ Engine console (reachable from Kotlin via `NativeBridge.nativeExecConsole`):
 | Android Gradle Plugin | 8.5.2 | Pinned in `build.gradle.kts` |
 | Gradle | 8.7 | Wrapper included — do not install separately |
 | Kotlin | 1.9.24 | Pinned in `build.gradle.kts` |
-| Android SDK | compile/target 34, min 24 | Installs on Android 7.0+; the Vulkan 1.3 renderer activates only on Vulkan 1.3 devices |
+| Android SDK | compile/target 34, min 21 | Android 5+; GLES 2 minimum, GLES 3 preferred on Android 8+ |
 | NDK | 26.3.11579264 | Pinned via `ndkVersion` |
 | CMake | 3.22.1 | Installed through the SDK manager |
-| Device | 32-bit or 64-bit ARM Android; **Vulkan 1.3** for rendering | Physical device recommended |
+| Device | ARM32/ARM64/x86/x86_64 Android; **OpenGL ES 2+** | Physical device recommended |
 
-The Vulkan 1.3 requirement is real, not nominal: the renderer uses core
-dynamic rendering and synchronization2 instead of the deprecated
-`VK_KHR_dynamic_rendering` / render-pass path. Most devices from 2022 onward
-with Adreno 6xx/7xx, Mali-G7x and newer report Vulkan 1.3. Check with:
-
-```bash
-adb shell dumpsys SurfaceFlinger | grep -i vulkan   # or install a Vulkan info app
-```
+Compatibility is negotiated with the actual EGL driver, not assumed from the
+Android version alone. Emulator tests cannot guarantee every OEM/GPU driver;
+physical-device testing remains necessary. No iOS build is included.
 
 ### To build the host targets (tests, compile checks)
 
@@ -152,7 +139,7 @@ On Windows use `gradlew.bat` instead of `./gradlew`.
 
 | Property | Default | Effect |
 | --- | --- | --- |
-| `nova.abiFilters` | `arm64-v8a,armeabi-v7a` | Comma-separated ABI list |
+| `nova.abiFilters` | `arm64-v8a,armeabi-v7a,x86,x86_64` | Comma-separated ABI list |
 | `nova.validation` | `true` | Vulkan validation layer in **debug** builds (release is always `false`) |
 | `nova.compileShaders` | `auto` | `auto` = use glslang if found, else keep checked-in `.spv`; `on` = fail without a compiler; `off` = always use checked-in `.spv` |
 | `nova.glslang` | *(unset)* | Absolute path to `glslangValidator` / `glslang` / `glslc` |
@@ -241,7 +228,7 @@ instead of silently doing nothing.
 | `NOVA_BUILD_TESTS` | `ON` | doctest unit tests (host only) |
 | `NOVA_HOST_CHECK` | `OFF` | Compile-check JNI/Android sources on host |
 | `NOVA_ENABLE_RHI_VULKAN` | `ON` | Vulkan 1.3 backend |
-| `NOVA_ENABLE_RHI_GLES` | `OFF` | OpenGL ES 3.2 fallback (post-M1) |
+| `NOVA_ENABLE_RHI_GLES` | `OFF` | OpenGL ES 2/3 (enabled by the Android app) |
 | `NOVA_ENABLE_PHYSICS` | `OFF` | Jolt physics (M5) |
 | `NOVA_ENABLE_AUDIO` | `OFF` | Oboe/miniaudio (M7) |
 | `NOVA_ENABLE_LUA` | `OFF` | Sol2 scripting (M8) |
@@ -259,9 +246,9 @@ Two GitHub Actions workflows run on every push and pull request:
 | Workflow | File | What it proves |
 | --- | --- | --- |
 | `host-build` | [.github/workflows/host-build.yml](.github/workflows/host-build.yml) | Unit tests on gcc, clang **and** clang+libc++ (`build/host`) — the last one reproduces the standard library the Android NDK builds against, so device-only breaks fail on the host in seconds. A separate job compile-checks the Android-only sources (JNI bridge, Vulkan backend, `AAssetManager`/`ANativeWindow`) against the shims in `tools/host_check` (`build/host-check`). Zero first-party warnings; compiler errors are re-published as check annotations. |
-| `android-apk` | [.github/workflows/android-apk.yml](.github/workflows/android-apk.yml) | The real device build path: JDK 17 + AGP 8.5.2 + Gradle 8.7 wrapper + NDK `26.3.11579264` + CMake `3.22.1` produce `app-debug.apk` for both `arm64-v8a` and `armeabi-v7a` in one APK. The APK is inspected (`libnova.so`, `assets/shaders/*.spv`, `classes.dex`) and uploaded as the **`nova-engine-debug-apk`** artifact. |
+| `android-apk` | [.github/workflows/android-apk.yml](.github/workflows/android-apk.yml) | The real device build path: JDK 17 + AGP 8.5.2 + Gradle 8.7 wrapper + NDK `26.3.11579264` + CMake `3.22.1` produce `app-debug.apk` for ARM32/ARM64/x86/x86_64 in one APK. The APK is inspected (`libnova.so`, `assets/shaders/*.spv`, `classes.dex`) and uploaded as the **`nova-engine-debug-apk`** artifact. |
 
-Every successful branch build republishes the APK as a **release asset**, which downloads
+After build, lint, packaging checks and API 21/26 emulator tests pass, the branch workflow republishes the APK as a **release asset**, which downloads
 as the bare `.apk` (no zip wrapper) — the easiest route from a phone browser or
 `curl`:
 
@@ -277,8 +264,8 @@ adb install -r nova-engine-debug.apk
 ```
 
 Each run also verifies the package before publishing it: `apksigner verify
---verbose --print-certs` (v2/v3 signature schemes), `zipalign -c 4`, and
-`aapt dump badging` (asserting `sdkVersion:24` and both ARM ABIs). Android lint
+--verbose --print-certs` (including v1 for Android 5/6), `zipalign -c 4`, and
+`aapt dump badging` (asserting `sdkVersion:21` and all four ABIs). Android lint
 checks API compatibility, and a `.sha256` checksum accompanies the APK. The output is
 posted to the job summary and as `apk-verify` check annotations.
 
@@ -291,22 +278,17 @@ has three causes, in order of likelihood:
    Use the release link above, or unzip the artifact first.
 2. The download was truncated (flaky mobile connection). Compare the file size
    against the asset size shown on the release page, or re-download over `adb`.
-3. The device runs **Android 6.0 or older**, or the file predates the minSdk-24
-   builds. `minSdk` is 24 (Android 7.0); check the device with
-   `adb shell getprop ro.build.version.sdk`. On Android 7.0+ with a 32-bit or 64-bit ARM OS, the package
-   can be installed; a device whose driver lacks Vulkan 1.3 then starts the
-   app and shows an explanatory dialog ("This device offers no Vulkan 1.3
-   renderer") instead of rendering, until the GLES 3.2 fallback backend lands
-   in a later milestone.
+3. The device runs **Android 4.4 or older**. Version 0.2.0 requires Android 5.0
+   / API 21 or newer. Check with `adb shell getprop ro.build.version.sdk`.
 
-**Updates:** this is a debug-signed demo APK, not a production release. If Android
-reports `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, the existing app was signed with a
-different key. Uninstall it before installing this build (this deletes app data).
-Version 0.1.2 includes both `armeabi-v7a` (32-bit) and `arm64-v8a` (64-bit)
-native libraries. A 64-bit processor can run a 32-bit Android OS, which could
-not install the older arm64-only APK.
-Lowering the install SDK does not add a GLES renderer; Vulkan 1.3 is still needed
-to render the demo.
+**Updates:** this is a debug-signed APK, not a production release. A fresh CI
+runner can create a different debug key. If you see
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, uninstalling the old app removes its data;
+back up your scene first. Stable production signing is not configured.
+
+Version 0.2.0 removes the Vulkan startup requirement and adds all four Android
+ABIs. Android 5/6 installation is checked using the APK's v1 signature as well
+as API-21 emulator installation.
 
 **Troubleshooting — "App not installed."** This is a generic installer error,
 not proof of a GPU/renderer problem. Download the new APK (not the artifact ZIP).
@@ -321,8 +303,8 @@ adb install -r nova-engine-debug.apk
 ```
 
 - `INSTALL_FAILED_NO_MATCHING_ABIS`: the APK does not contain your Android OS's
-  native ABI. Use version 0.1.2+ for 32-bit ARM; x86 devices are not supported.
-- `INSTALL_FAILED_OLDER_SDK`: this build needs Android 7.0 / API 24 or newer.
+  native ABI. Use version 0.2.0+ for ARM and x86, in both 32- and 64-bit variants.
+- `INSTALL_FAILED_OLDER_SDK`: this build needs Android 5.0 / API 21 or newer.
 - `INSTALL_FAILED_UPDATE_INCOMPATIBLE`: signing-key conflict; uninstalling the
   existing app removes its data. Check other profiles/Secure Folder as well.
 - `INSTALL_FAILED_INSUFFICIENT_STORAGE`: free internal storage and retry.
@@ -338,6 +320,10 @@ identical to a plain local checkout.
 ---
 
 ## 5. Shaders
+
+The default GLES renderer uses embedded GLSL ES 1.00 sources in
+`engine/renderer/GlesShaders.h`, accepted by both ES 2 and ES 3 contexts.
+It does not load or compile SPIR-V. The following is for the optional Vulkan backend.
 
 GLSL sources live in `shaders/`; the compiled SPIR-V that ships in the APK is
 checked in at `app/src/main/assets/shaders/*.spv`, so **a plain checkout builds
@@ -388,7 +374,7 @@ Unreal-Engine-Mobile/
 │   ├── platform/               InputQueue, VirtualFileSystem (APK + data mounts)
 │   ├── rhi/                    IDevice contract, RhiTypes, DeviceFactory
 │   │   ├── vulkan/             Vulkan 1.3 backend (device, swapchain, resources)
-│   │   └── gles/               OpenGL ES 3.2 fallback (post-M1)
+│   │   └── gles/               OpenGL ES 2/3 (enabled by the Android app)
 │   ├── renderer/               Renderer: gradient pass + scene-driven draw list
 │   ├── scene/                  M2 ECS, transform hierarchy, cameras, frustum culling
 │   ├── assets/                 M2 loaders: strict JSON reader, base64/data URIs (glTF next)

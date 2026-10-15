@@ -1,5 +1,11 @@
 # Nova Engine — Milestones
 
+**0.2.0 compatibility/editor slice delivered:** native GLES 2/3, Android 5+,
+all four Android ABIs, depth-tested primitives, editable transforms/tint,
+undo/redo, local scene persistence and an on-screen console. See
+[ANDROID_EDITOR.md](ANDROID_EDITOR.md). This does not complete glTF/PBR, physics,
+scripting, asset import or game export milestones.
+
 Milestone definitions, acceptance criteria, and current status. Work proceeds
 one milestone at a time: a milestone is done when its acceptance criteria are
 met **and** its code is covered by the host test/compile-check suite.

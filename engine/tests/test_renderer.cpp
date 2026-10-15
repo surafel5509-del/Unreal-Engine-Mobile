@@ -147,6 +147,9 @@ public:
     std::vector<std::string> createdPipelines;
     nova::core::u32 liveResources = 0;
     bool failShaderModules = false;
+    bool glsl = false;
+    std::vector<std::string> shaderSources;
+    bool usesGlsl() const override { return glsl; }
     nova::core::u32 endFrameCalls = 0;
     MockCommandBuffer commandBuffer;
     MockTexture backbuffer{Format::RGBA8_UNorm, 640, 360};
@@ -156,6 +159,7 @@ public:
         return makeUnique<MockBuffer>(this, desc);
     }
     Unique<IShaderModule> createShaderModule(const ShaderModuleDesc& desc) override {
+        shaderSources.emplace_back(desc.glsl);
         if (failShaderModules) return nullptr;
         return makeUnique<MockShader>(desc.stage);
     }
@@ -541,4 +545,29 @@ TEST_CASE("viewProjection adapts to aspect ratio and is Vulkan-correct") {
     // World origin lands at the clip centre with positive W.
     const math::Vec4 clip = wide * math::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
     CHECK(clip.w > 0.0f);
+}
+
+TEST_CASE("GLES renderer initializes without SPIR-V and draws tinted cubes") {
+    MockDevice device;
+    device.glsl = true;
+    renderer::Renderer renderer;
+    REQUIRE(renderer.init(device, {}, {}, {}, {}).isOk());
+    REQUIRE(device.shaderSources.size() == 4);
+    for (const auto& source : device.shaderSources) CHECK_FALSE(source.empty());
+    auto commands = triangleCommands(1);
+    commands[0].mesh = renderer::BuiltinMesh::kCube;
+    commands[0].tint = math::Vec4(0.2f, 0.4f, 0.8f, 1.0f);
+    rhi::FrameInfo frame{};
+    REQUIRE(device.beginFrame(frame));
+    REQUIRE(renderer.render(frame, makeSnapshot(0.0f, 1.0f, commands)));
+    const auto* uniforms = sliceAt(device.commandBuffer.events, 1);
+    REQUIRE(uniforms != nullptr);
+    CHECK(uniforms->accent.x == doctest::Approx(0.2f));
+    bool cubeDrawn = false;
+    for (const auto& event : device.commandBuffer.events)
+        if (event.kind == EventKind::Draw && event.count == 36) cubeDrawn = true;
+    CHECK(cubeDrawn);
+    CHECK(device.commandBuffer.boundPipeline->depthTest);
+    CHECK(device.commandBuffer.boundPipeline->depthWrite);
+    device.endFrame();
 }

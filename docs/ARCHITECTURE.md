@@ -1,5 +1,10 @@
 # Nova Engine — Architecture
 
+> **0.2.0 update:** the Android APK now uses the native GLES 2/3 backend and
+> scene editor. See [ANDROID_EDITOR.md](ANDROID_EDITOR.md) for its lifecycle,
+> compatibility policy and limitations. Vulkan sections below are historical
+> documentation of the retained optional backend, not current APK requirements.
+
 This document describes the design of the engine as it exists at the end of
 **Milestone M1** (Vulkan 1.3 renderer, gradient + rotating triangle demo), and
 the seams where later milestones attach.

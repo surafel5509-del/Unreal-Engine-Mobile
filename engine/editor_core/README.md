@@ -1,26 +1,13 @@
-# `editor_core` — Nova Engine module
+# Editor scene document
 
-**Namespace:** `nova::editor_core`  ·  **Milestone:** M9  ·  **CMake flag:** `n/a (host-only)`
+`nova::editor::parseScene` validates the version-1 JSON scene format without
+throwing exceptions or touching live engine state. It is compiled into both
+host tests and the Android runtime. Parsing uses local state and is reentrant;
+Engine applies a successful result while holding its scene/frame mutex.
 
-Host-only editor/tooling core: project model, asset database, undo stack. Never compiled into `libnova.so`.
+Implemented: known primitive types, bounded finite transforms/tint, maximum
+32 objects and 64 KiB input. Tests: `engine/tests/test_editor_scene.cpp`.
 
-## Planned contents (M9)
-
-* Project/scene document model
-* Asset database and import pipeline front-end
-* Command/undo stack
-* Host-side UI integration points
-
-## Status
-
-Placeholder directory: no sources are compiled into `nova_engine` yet, so the
-host build and the Android build are unaffected by it. The module lands with
-M9 together with its doctest suite in `engine/tests/`.
-
-Rules that apply the moment code arrives (see
-[`docs/CODING_STANDARDS.md`](../../docs/CODING_STANDARDS.md)):
-
-* depend only on layers below this one (`core` → `platform`/`rhi` → `renderer` → `Engine`);
-* no exceptions — return `nova::Result<T, E>`;
-* Doxygen comments plus an explicit thread-safety statement on every public class;
-* unit tests in `engine/tests/` registered with CTest.
+The Kotlin `EditorView` owns UI, JSON snapshots, undo/redo and AtomicFile
+persistence. Future work includes multi-scene project/asset databases,
+external import/export and a generalized component editor.
