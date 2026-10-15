@@ -46,21 +46,32 @@ public class EditorIntegrationTest {
             assertTrue(viewport.getGlobalVisibleRect(bounds));
         });
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-        Bitmap bitmap = InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
-        assertNotNull("Screenshot unavailable", bitmap);
-        // Ignore UI chrome and axis label: a lit blue cube must occupy the
-        // interior of the SurfaceView, not just a counter claiming to render.
+        Bitmap bitmap = null;
         int coloredPixels = 0;
-        for (int y = bounds.top + bounds.height() / 5; y < bounds.bottom - bounds.height() / 5; y += 3) {
-            for (int x = bounds.left + bounds.width() / 5; x < bounds.right - bounds.width() / 5; x += 3) {
-                int pixel = bitmap.getPixel(x, y);
-                if (Color.blue(pixel) > 100 && Color.green(pixel) > 60 && Color.blue(pixel) > Color.red(pixel) * 1.1) coloredPixels++;
+        long deadline = System.currentTimeMillis() + 10000;
+        // A rendered native frame can precede the first SurfaceFlinger composite
+        // during an Activity transition, especially on the API-21 emulator.
+        do {
+            if (bitmap != null) bitmap.recycle();
+            bitmap = InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
+            assertNotNull("Screenshot unavailable", bitmap);
+            coloredPixels = 0;
+            for (int y = bounds.top + bounds.height() / 5; y < bounds.bottom - bounds.height() / 5; y += 3) {
+                for (int x = bounds.left + bounds.width() / 5; x < bounds.right - bounds.width() / 5; x += 3) {
+                    int pixel = bitmap.getPixel(x, y);
+                    if (Color.blue(pixel) > 100 && Color.green(pixel) > 60 && Color.blue(pixel) > Color.red(pixel) * 1.1) coloredPixels++;
+                }
             }
-        }
-        assertTrue("Viewport contains no visible cube pixels: " + coloredPixels, coloredPixels > 50);
+            if (coloredPixels > 50) break;
+            Thread.sleep(250);
+        } while (System.currentTimeMillis() < deadline);
         File screenshot = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "editor-tested.png");
         try (FileOutputStream output = new FileOutputStream(screenshot)) { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); }
+        String detail = "pixels=" + coloredPixels + " viewport=" + bounds + " bitmap=" + bitmap.getWidth() + "x" + bitmap.getHeight()
+            + " center=" + Integer.toHexString(bitmap.getPixel(bounds.centerX(), bounds.centerY()))
+            + " stats=" + NativeBridge.INSTANCE.nativeExecConsole("stats");
         bitmap.recycle();
+        assertTrue("Viewport contains no visible cube pixels: " + detail, coloredPixels > 50);
     }
     @Test public void rendersEditsSavesAndRestoresAcrossLifecycle() throws Exception {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
