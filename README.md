@@ -356,7 +356,7 @@ Unreal-Engine-Mobile/
 │   ├── build.gradle.kts        AGP config, ABI filters, shader task
 │   ├── proguard-rules.pro
 │   └── src/main/
-│       ├── AndroidManifest.xml Vulkan 1.3 feature, configChanges, singleTask
+│       ├── AndroidManifest.xml GLES 2 feature, configChanges, singleTask
 │       ├── assets/shaders/     Compiled SPIR-V shipped in the APK
 │       ├── cpp/jni_bridge.cpp  The 10 JNI entry points (thin by design)
 │       ├── java/com/nova/engine/
@@ -397,13 +397,12 @@ Unreal-Engine-Mobile/
 
 ## 7. Troubleshooting
 
-**`Vulkan 1.3 not supported` / `EngineError::DeviceCreateFailed` (code 2)**
-The device or emulator does not report Vulkan 1.3. Use a physical device from
-2022 or newer, or an emulator image with Vulkan 1.3 host support. The manifest
-already declares `android.hardware.vulkan.version = 0x00030000` as required, so
-Play filtering hides the app on unsupported devices.
+**`Vulkan 1.3 not supported` / old error-2 dialog**
+You are running an older APK. Version 0.2.0 uses GLES and does not require Vulkan.
+If its GLES initialization fails, collect `adb logcat -s nova NovaMain` plus the
+phone model/Android version. A driver failure is not fixed by changing minSdk.
 
-**Validation layer warnings at startup, or init fails with validation on**
+**Optional Vulkan builds: validation layer warnings at startup**
 Some devices do not ship `VK_LAYER_KHRONOS_validation`. The engine logs a
 warning and continues without it; to silence it build with
 `-Pnova.validation=false`.
@@ -424,7 +423,7 @@ The CMake/Ninja logs live under `app/.cxx/`; the configure log is also echoed
 by `./gradlew externalNativeBuildDebug --info`.
 
 **Black screen, no crash**
-Check `adb logcat -s NovaEngine:V`. The engine logs swapchain format, present
+Check `adb logcat -s nova NovaMain NovaRuntime`. The engine logs swapchain format, present
 mode, image count, and pipeline creation; `nativeFrame` returning
 `FRAME_SKIPPED` (1) repeatedly means the surface was not attached yet.
 

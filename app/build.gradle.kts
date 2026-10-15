@@ -36,10 +36,8 @@ android {
             cmake {
                 cppFlags += listOf("-std=c++20")
                 arguments += listOf(
-                    // Validation layers are a runtime decision: the Kotlin
-                    // layer passes BuildConfig.NOVA_VALIDATION into
-                    // nativeInit(), which forwards it to the Vulkan device
-                    // description. Nothing here needs a compile-time switch.
+                    // GLES-only compatibility APK: linking Vulkan here would
+                    // prevent Android 5/6 from loading the native engine.
                     "-DNOVA_BUILD_TESTS=OFF",
                     "-DNOVA_ENABLE_RHI_VULKAN=OFF",
                     "-DNOVA_ENABLE_RHI_GLES=ON",

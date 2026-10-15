@@ -127,7 +127,7 @@ public:
     PresentMode presentMode() const override { return PresentMode::Fifo; }
     bool beginFrame(FrameInfo& out) override {
         if (!window) return false;
-        if (context == EGL_NO_CONTEXT && !initialize()) return false;
+        if (context == EGL_NO_CONTEXT && !initialize()) { destroyContext(); return false; }
         if (surface == EGL_NO_SURFACE) setSurface(window, backbuffer.w, backbuffer.h);
         if (surface == EGL_NO_SURFACE) return false;
         if (!eglMakeCurrent(display, surface, surface, context)) {

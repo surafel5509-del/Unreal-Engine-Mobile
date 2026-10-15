@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Check the shipped ARM libraries, not just Gradle's requested ABI list."""
+"""Check the shipped Android libraries, not just Gradle's requested ABI list."""
 import struct
 import sys
 import zipfile
 
 # ELF class and e_machine for each Android ABI (little-endian ELF).
-ARM_ABIS = {"arm64-v8a": (2, 183), "armeabi-v7a": (1, 40), "x86": (1, 3), "x86_64": (2, 62)}
+APK_ABIS = {"arm64-v8a": (2, 183), "armeabi-v7a": (1, 40), "x86": (1, 3), "x86_64": (2, 62)}
 # The project uses CMake/NDK's default static C++ runtime.
 LIBRARIES = ("libnova.so",)
 
@@ -15,7 +15,7 @@ def verify_apk(path):
         bad_entry = apk.testzip()
         if bad_entry:
             raise ValueError(f"APK CRC mismatch: {bad_entry}")
-        for abi, (elf_class, machine) in ARM_ABIS.items():
+        for abi, (elf_class, machine) in APK_ABIS.items():
             libraries = list(LIBRARIES)
             if f"lib/{abi}/libc++_shared.so" in apk.namelist():
                 libraries.append("libc++_shared.so")

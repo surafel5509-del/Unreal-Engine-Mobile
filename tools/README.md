@@ -6,7 +6,7 @@ ships inside the APK.
 | Tool | Purpose |
 | --- | --- |
 | [`compile_shaders.sh`](compile_shaders.sh) | Compile `shaders/*.vert|*.frag` to SPIR-V for Vulkan 1.3 |
-| [`verify_apk_contents.py`](verify_apk_contents.py) | Check APK ZIP integrity and ELF architecture of both ARM native libraries |
+| [`verify_apk_contents.py`](verify_apk_contents.py) | Check APK ZIP integrity and ELF architecture of all four Android native libraries |
 | [`host_check/`](host_check/README.md) | Shim headers + stubs that let the Android-only sources compile on a host |
 
 ---
@@ -104,7 +104,7 @@ python3 tools/verify_apk_contents.py app/build/outputs/apk/debug/app-debug.apk
 python3 -m unittest discover -s tools/tests -p 'test_apk_contents.py' -v
 ```
 
-Both ARM directories must contain `libnova.so` with matching ELF class/machine.
+All four ABI directories must contain `libnova.so` with matching ELF class/machine.
 The CMake/NDK default links the C++ runtime statically; a packaged shared C++
 runtime, if present, also has its architecture checked. These checks do not
 replace device installation or GPU testing.

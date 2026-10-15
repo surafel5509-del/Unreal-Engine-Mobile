@@ -7,12 +7,12 @@ import unittest
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from verify_apk_contents import ARM_ABIS, LIBRARIES, verify_apk
+from verify_apk_contents import APK_ABIS, LIBRARIES, verify_apk
 
 
 def libraries():
     result = {}
-    for abi, (elf_class, machine) in ARM_ABIS.items():
+    for abi, (elf_class, machine) in APK_ABIS.items():
         header = bytearray(64)
         header[:6] = b"\x7fELF" + bytes([elf_class, 1])
         struct.pack_into("<H", header, 18, machine)
@@ -31,7 +31,7 @@ def archive(entries):
 
 
 class ApkContentsTest(unittest.TestCase):
-    def test_both_arm_abis(self):
+    def test_all_android_abis(self):
         verify_apk(archive(libraries()))
 
     def test_missing_library(self):

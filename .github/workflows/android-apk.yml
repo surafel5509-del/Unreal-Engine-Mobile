@@ -1,16 +1,8 @@
 name: android-apk
 
-# Builds the runnable demo APK with the real Android toolchain — the path the
-# host workflows cannot cover: JDK 17, AGP 8.5.2, Gradle 8.7 (wrapper),
-# NDK 26.3.11579264 and CMake 3.22.1 compiling the C++20 engine for arm64-v8a + armeabi-v7a,
-# Kotlin sources, JNI bridge, manifest and the checked-in SPIR-V assets.
-#
-# The resulting APK is uploaded as a build artifact and can be installed with:
-#   adb install -r nova-engine-debug.apk
-#
-# Shader compilation is intentionally left on "auto" (gradle.properties): no
-# glslangValidator exists on the runner, so the task skips itself and the APK
-# ships the committed .spv files — exactly what a plain checkout does.
+# Android 5+ GLES editor: compile all four ABIs, verify minSdk/signatures/ELF,
+# then run API 21 and API 26 instrumentation before publishing a direct APK.
+# Vulkan SPIR-V assets remain in the tree for optional development builds.
 
 on:
   push:
@@ -261,7 +253,8 @@ jobs:
         if: always()
         run: |
           if [ -f device-run.log ]; then
-            tail -30 device-run.log | while IFS= read -r line; do echo "::notice title=Device runner::${line}"; done
+            grep -E 'OK \(|Error:|Failure|FAILURES|INSTRUMENTATION_RESULT' device-run.log | head -15 \
+              | while IFS= read -r line; do echo "::notice title=Device runner::${line}"; done || true
           fi
           if [ ! -f device-test.log ]; then
             echo "::error::Emulator setup or APK installation failed before instrumentation"
@@ -282,6 +275,7 @@ jobs:
             device-logcat.log
             device-errors.log
             editor-screenshot.png
+            editor-tested.png
 
   publish:
     name: Publish tested APK

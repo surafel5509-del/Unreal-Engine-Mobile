@@ -1,6 +1,12 @@
 package com.nova.engine;
 
 import android.os.Build;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.Rect;
+import android.widget.EditText;
+import androidx.test.platform.app.InstrumentationRegistry;
+import java.io.FileOutputStream;
 import android.view.View;
 import androidx.lifecycle.Lifecycle;
 import androidx.test.core.app.ActivityScenario;
@@ -32,9 +38,34 @@ public class EditorIntegrationTest {
             assertTrue(button.performClick());
         });
     }
+    private void assertViewportPixels(ActivityScenario<MainActivity> scenario) throws Exception {
+        Rect bounds = new Rect();
+        scenario.onActivity(activity -> {
+            View viewport = activity.getWindow().getDecorView().findViewWithTag("viewport");
+            assertNotNull(viewport);
+            assertTrue(viewport.getGlobalVisibleRect(bounds));
+        });
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        Bitmap bitmap = InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
+        assertNotNull("Screenshot unavailable", bitmap);
+        // Ignore UI chrome and axis label: a lit blue cube must occupy the
+        // interior of the SurfaceView, not just a counter claiming to render.
+        int coloredPixels = 0;
+        for (int y = bounds.top + bounds.height() / 5; y < bounds.bottom - bounds.height() / 5; y += 3) {
+            for (int x = bounds.left + bounds.width() / 5; x < bounds.right - bounds.width() / 5; x += 3) {
+                int pixel = bitmap.getPixel(x, y);
+                if (Color.blue(pixel) > 100 && Color.green(pixel) > 60 && Color.blue(pixel) > Color.red(pixel) * 1.1) coloredPixels++;
+            }
+        }
+        assertTrue("Viewport contains no visible cube pixels: " + coloredPixels, coloredPixels > 50);
+        File screenshot = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "editor-tested.png");
+        try (FileOutputStream output = new FileOutputStream(screenshot)) { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); }
+        bitmap.recycle();
+    }
     @Test public void rendersEditsSavesAndRestoresAcrossLifecycle() throws Exception {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             waitForFrames();
+            assertViewportPixels(scenario);
             String graphics = NativeBridge.INSTANCE.nativeExecConsole("graphics");
             assertTrue(graphics, graphics.contains(Build.VERSION.SDK_INT >= 26 ? "OpenGL ES 3" : "OpenGL ES 2"));
             assertTrue(NativeBridge.INSTANCE.nativeExecConsole("stats").contains("editor_objects=1"));
@@ -43,6 +74,17 @@ public class EditorIntegrationTest {
             click(scenario, "undo");
             assertTrue(NativeBridge.INSTANCE.nativeExecConsole("stats").contains("editor_objects=1"));
             click(scenario, "redo");
+            assertTrue(NativeBridge.INSTANCE.nativeExecConsole("stats").contains("editor_objects=2"));
+            click(scenario, "object_1");
+            scenario.onActivity(activity -> {
+                EditText x = activity.getWindow().getDecorView().findViewWithTag("field_x");
+                assertNotNull(x); x.setText("0.2");
+            });
+            click(scenario, "apply");
+            assertTrue(NativeBridge.INSTANCE.nativeExecConsole("scene").contains("position=0.2,"));
+            click(scenario, "duplicate");
+            assertTrue(NativeBridge.INSTANCE.nativeExecConsole("stats").contains("editor_objects=3"));
+            click(scenario, "delete");
             assertTrue(NativeBridge.INSTANCE.nativeExecConsole("stats").contains("editor_objects=2"));
             click(scenario, "play");
             assertTrue(NativeBridge.INSTANCE.nativeExecConsole("stats").contains("playing=yes"));

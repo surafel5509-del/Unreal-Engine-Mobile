@@ -10,10 +10,10 @@ import android.os.Bundle
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.KeyEvent
-import android.view.Surface
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.widget.EditText
 import android.view.WindowManager
 import com.nova.engine.runtime.NovaRuntime
 
@@ -60,6 +60,7 @@ class MainActivity : Activity() {
         runtime = NovaRuntime()
 
         surfaceView = NovaSurfaceView(this).apply {
+            tag = "viewport"
             onSurfaceReady = { surface -> runtime.onSurfaceReady(surface) }
             onSurfaceSizeChanged = { w, h -> runtime.onSurfaceSizeChanged(w, h) }
             onSurfaceLost = { handleSurfaceLost() }
@@ -102,12 +103,12 @@ class MainActivity : Activity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (nativeAlive && inputManager.onKey(event)) return true
+        if (nativeAlive && !event.isSystem && currentFocus !is EditText && inputManager.onKey(event)) return true
         return super.onKeyDown(keyCode, event)
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (nativeAlive && inputManager.onKey(event)) return true
+        if (nativeAlive && !event.isSystem && currentFocus !is EditText && inputManager.onKey(event)) return true
         return super.onKeyUp(keyCode, event)
     }
 

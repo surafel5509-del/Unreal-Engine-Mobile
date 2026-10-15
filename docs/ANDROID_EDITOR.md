@@ -80,8 +80,8 @@ python3 -m unittest discover -s tools/tests -v
 GitHub Actions builds all four ABIs, checks ELF architecture and absence of
 Vulkan linkage, asserts SDK 21, verifies signing/alignment, then runs actual
 installation and instrumentation on API 21/x86 and API 26/x86_64 emulators.
-Tests require advancing native frames, the expected GLES context, working
-add/undo/redo/play/save controls, invalid-scene rejection, background/resume,
+Tests require visible colored cube pixels in a SurfaceView screenshot, advancing native frames, the expected GLES context, working
+add/transform/duplicate/delete/undo/redo/play/save controls, invalid-scene rejection, background/resume,
 and Activity recreation with restored objects. Shader/link/GL errors fail CI.
 The workflow uploads test output, logcat and a real editor screenshot. Publication
 is gated on both emulator jobs. These software-rendered tests do not replace

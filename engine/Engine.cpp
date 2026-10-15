@@ -418,6 +418,17 @@ EngineStats Engine::stats() const {
 }
 
 void Engine::registerConsoleCommands() {
+    m_console.registerCommand("scene", "List authored native objects and positions", [this](core::Console::Arguments) {
+        std::ostringstream out;
+        for (usize i = 0; i < m_editorObjects.size(); ++i) {
+            const auto& object = m_editorObjects[i];
+            const auto& p = object.transform.position;
+            out << i << " " << (object.mesh == renderer::BuiltinMesh::kCube ? "Cube" : "Triangle")
+                << " position=" << p.x << "," << p.y << "," << p.z
+                << " scale=" << object.transform.scale.x << "\n";
+        }
+        return m_editorObjects.empty() ? std::string("Empty scene") : out.str();
+    });
     m_console.registerCommand("camera", "camera <distance 1.5..20>", [this](core::Console::Arguments args) {
         if (args.size() != 1) return std::string("usage: camera <1.5..20>");
         char* end = nullptr;
