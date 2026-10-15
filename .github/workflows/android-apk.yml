@@ -266,7 +266,8 @@ jobs:
           if [ -f device-test.log ]; then
             tail -60 device-test.log >> "$GITHUB_STEP_SUMMARY"
             if ! grep -q 'OK (1 test)' device-test.log; then
-              tail -30 device-test.log | while IFS= read -r line; do echo "::error title=Device test::${line}"; done
+              grep -E 'AssertionError|Exception:|Caused by:|FAILURES|Tests run:|INSTRUMENTATION_FAILED|Error:' device-test.log | head -10 \
+                | while IFS= read -r line; do echo "::error title=Device test::${line}"; done || true
             fi
           fi
       - uses: actions/upload-artifact@v4

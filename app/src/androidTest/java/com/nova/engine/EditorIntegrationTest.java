@@ -65,7 +65,7 @@ public class EditorIntegrationTest {
             if (coloredPixels > 50) break;
             Thread.sleep(250);
         } while (System.currentTimeMillis() < deadline);
-        File screenshot = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "editor-tested.png");
+        File screenshot = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(), "editor-tested.png");
         try (FileOutputStream output = new FileOutputStream(screenshot)) { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); }
         String detail = "pixels=" + coloredPixels + " viewport=" + bounds + " bitmap=" + bitmap.getWidth() + "x" + bitmap.getHeight()
             + " center=" + Integer.toHexString(bitmap.getPixel(bounds.centerX(), bounds.centerY()))

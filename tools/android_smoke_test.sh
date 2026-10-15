@@ -2,7 +2,7 @@
 set -euo pipefail
 exec > >(tee device-run.log) 2>&1
 # Always retain diagnostics, including when install/instrumentation fails.
-trap 'adb logcat -d > device-logcat.log; adb exec-out screencap -p > editor-screenshot.png; adb pull /sdcard/Android/data/com.nova.engine/files/editor-tested.png . || true' EXIT
+trap 'adb logcat -d > device-logcat.log; adb exec-out screencap -p > editor-screenshot.png; adb exec-out run-as com.nova.engine cat files/editor-tested.png > editor-tested.png || true' EXIT
 adb install -r apks/nova-engine-debug.apk
 adb install -r apks/app-debug-androidTest.apk
 adb logcat -c || echo "::warning::Emulator log buffer could not be cleared; continuing with app-scoped checks"
