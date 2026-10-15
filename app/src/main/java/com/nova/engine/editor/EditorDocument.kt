@@ -18,6 +18,7 @@ class EditorDocument(initial: JSONObject) {
     fun canRedo() = !redo.isEmpty()
     fun record() { undo.addLast(Snapshot(json.toString(), selected)); trimHistory(30); redo.clear() }
     fun replace(next: JSONObject, remember: Boolean = true): String {
+        if(next.toString()==json.toString()) return "ok"
         val result = NativeBridge.nativeSetScene(next.toString())
         if (result != "ok") return result
         if (remember) record()

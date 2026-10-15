@@ -38,7 +38,7 @@ class EditorUi(val context:Context) {
         layoutParams=LinearLayout.LayoutParams(-2,dp(40)).apply {setMargins(dp(2),dp(2),dp(2),dp(2))}
         setOnClickListener {action()}
     }
-    fun title(parent:LinearLayout,value:String) { parent.addView(text(value,11f).apply {typeface=Typeface.create("sans-serif-medium",0);setBackgroundColor(StudioColors.raised)},LinearLayout.LayoutParams(-1,dp(30))) }
+    fun title(parent:LinearLayout,value:String) { parent.addView(text(value,11f).apply {typeface=Typeface.create("sans-serif-medium",Typeface.NORMAL);setBackgroundColor(StudioColors.raised)},LinearLayout.LayoutParams(-1,dp(30))) }
 }
 
 /** Small vector icon set, drawn at device density; no bitmap atlas allocations. */

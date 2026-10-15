@@ -268,6 +268,17 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           script: bash tools/android_smoke_test.sh
+      - name: Inline screenshot review thumbnail
+        if: always()
+        run: |
+          python3 - <<'PYIMAGE'
+          import base64, pathlib
+          path = pathlib.Path('editor-review.jpg')
+          if path.is_file() and 0 < path.stat().st_size < 200000:
+              encoded = base64.b64encode(path.read_bytes()).decode()
+              for index, start in enumerate(range(0, len(encoded), 24000)):
+                  print(f"::notice title=editor-review-{index}::{encoded[start:start+24000]}")
+          PYIMAGE
       - name: Report test result
         if: always()
         run: |

@@ -81,7 +81,7 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
         (viewport.parent as? ViewGroup)?.removeView(viewport);removeAllViews();actions.clear();logText=null;outputText=null
         val top=ui.row().apply {setBackgroundColor(StudioColors.panel)}
         top.addView(StudioIcon(context,"cube",StudioColors.blue),lp(ui.dp(42),ui.dp(42)))
-        val brand=ui.column();brand.addView(ui.text("NOVA STUDIO",13f).apply{typeface=Typeface.create("sans-serif-medium",0)})
+        val brand=ui.column();brand.addView(ui.text("NOVA STUDIO",13f).apply{typeface=Typeface.create("sans-serif-medium",Typeface.NORMAL)})
         titleText=ui.text(store.projectName,9f,StudioColors.muted);brand.addView(titleText);brand.setOnClickListener{projects()};brand.tag="projects"
         top.addView(brand,lp(ui.dp(130),-1))
         val tabs=ui.row()
@@ -169,7 +169,7 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
             colors.addView(swatch,lp(0,ui.dp(32),1f).apply{setMargins(ui.dp(3),ui.dp(4),ui.dp(3),ui.dp(4))})
         };inspector.addView(colors)
         inspector.addView(CheckBox(context).apply{text="Rotate during Play";textSize=11f;setTextColor(StudioColors.text);isChecked=obj.optBoolean("spin",false);tag="spin";setOnCheckedChangeListener{_,checked->editSelected{it.put("spin",checked)}}})
-        inspector.addView(button("Save as prefab","prefab","prefab"){askName("Prefab name",obj.optString("name","Prefab")){n->safe{store.savePrefab(n,JSONObject(obj.toString()));log("Prefab saved: $n");category="Prefabs";dockTab="Assets";refreshDock()}}})
+        inspector.addView(button("Save as prefab","prefab","prefab"){saveSelectedPrefab()})
         if(obj.getString("kind")=="Terrain"){
             ui.title(inspector,"Terrain  ·  17 × 17 heightfield")
             inspector.addView(ui.text("Center brush • radius 3 samples",10f,StudioColors.muted))
@@ -191,7 +191,7 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
     private fun assetPanel(){
         val row=ui.row();val folders=ui.column();for(folder in listOf("Meshes","Scenes","Prefabs","Scripts")) folders.addView(ui.text(folder,10f,if(folder==category)StudioColors.blue else StudioColors.muted).apply{tag="assets_$folder";minimumHeight=ui.dp(32);setOnClickListener{category=folder;refreshDock()}})
         row.addView(ui.scroll(folders),lp(ui.dp(82),-1))
-        val content=ui.column();val crumbs=ui.row();crumbs.addView(ui.text("Assets  ›  $category",10f,StudioColors.muted),lp(0,ui.dp(26),1f));crumbs.addView(ui.text("+",16f,StudioColors.blue).apply{contentDescription="Create $category asset";setOnClickListener{when(category){"Scenes"->newScene();"Scripts"->askName("Script name","Preview"){editScript(it)};"Prefabs"->actions["prefab"]?.performClick();else->addMenu()}}});content.addView(crumbs)
+        val content=ui.column();val crumbs=ui.row();crumbs.addView(ui.text("Assets  ›  $category",10f,StudioColors.muted),lp(0,ui.dp(26),1f));crumbs.addView(ui.text("+",16f,StudioColors.blue).apply{contentDescription="Create $category asset";setOnClickListener{when(category){"Scenes"->newScene();"Scripts"->askName("Script name","Preview"){editScript(it)};"Prefabs"->saveSelectedPrefab();else->addMenu()}}});content.addView(crumbs)
         val cards=ui.row();val entries=when(category){"Meshes"->SceneTemplates.meshes;"Scenes"->store.scenes();"Prefabs"->store.prefabs();else->store.scripts()}
         if(entries.isEmpty())cards.addView(ui.text("No $category yet. Use + or the Inspector to create one.",11f,StudioColors.muted))
         for(name in entries){val icon=when(category){"Meshes"->name;"Scenes"->"scene";"Prefabs"->"prefab";else->"script"};val card=ui.column().apply{
@@ -200,6 +200,13 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
                 setOnClickListener{safe{when(category){"Meshes"->addObject(name);"Scenes"->{if(save())open(store.openScene(name))};"Prefabs"->addPrefab(store.prefab(name));else->editScript(name)}}}
             };cards.addView(card,lp(ui.dp(74),ui.dp(52)).apply{setMargins(ui.dp(4),0,ui.dp(4),0)})}
         content.addView(ui.horizontal(cards),lp(-1,0,1f));row.addView(content,lp(0,-1,1f));dock.addView(row,lp(-1,-1))
+    }
+    private fun saveSelectedPrefab() {
+        val obj=doc.selectedObject() ?: return toast("Select an object before creating a prefab")
+        askName("Prefab name",obj.optString("name","Prefab")) { name ->
+            store.savePrefab(name,JSONObject(obj.toString()))
+            log("Prefab saved: $name");category="Prefabs";dockTab="Assets";refreshDock()
+        }
     }
     private fun addMenu(){AlertDialog.Builder(context).setTitle("Add native mesh").setItems(SceneTemplates.meshes.toTypedArray()){_,i->addObject(SceneTemplates.meshes[i])}.show()}
     private fun addObject(kind:String){addPrefab(SceneTemplates.objectOf(kind,"$kind ${doc.objects.length()+1}"))}
@@ -264,12 +271,12 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
             MotionEvent.ACTION_MOVE->if(drag&&!pinch.isInProgress&&!pinched&&event.pointerCount==1){val dx=event.x-lastX;val dy=event.y-lastY
                 if(game||mode=="Orbit"){val c=camera();c.put("yaw",(c.optDouble("yaw",30.0)+dx*.25)%360);c.put("pitch",(c.optDouble("pitch",28.0)+dy*.2).coerceIn(-80.0,80.0));setCamera(c);applyCamera()}
                 else if(!playing&&doc.selectedObject()!=null&&(abs(event.x-startX)+abs(event.y-startY)>ui.dp(4))){
-                    if(!edited){doc.record();edited=true};val next=JSONObject(doc.json.toString());val o=next.getJSONArray("objects").getJSONObject(doc.selected)
+                    val next=JSONObject(doc.json.toString());val o=next.getJSONArray("objects").getJSONObject(doc.selected)
                     val units=1.1547*camera().optDouble("distance",13.0)/max(1,viewport.height)
                     when(mode){"Move"->{val key=when(axis){"X"->"x";"Y"->"y";"Z"->"z";else->"x"};o.put(key,(o.getDouble(key)+(if(axis=="Y")-dy else dx)*units).coerceIn(-1000.0,1000.0));if(axis=="Free")o.put("y",(o.getDouble("y")-dy*units).coerceIn(-1000.0,1000.0))}
                         "Rotate"->{val key=when(axis){"X"->"rx";"Z"->"rz";else->"ry"};o.put(key,(o.getDouble(key)+dx*.5).coerceIn(-1000.0,1000.0))}
                         "Scale"->{val keys=when(axis){"X"->listOf("sx");"Y"->listOf("sy");"Z"->listOf("sz");else->listOf("sx","sy","sz")};for(k in keys)o.put(k,(o.optDouble(k,o.optDouble("scale",1.0))*exp(dx*.008)).coerceIn(.05,10.0))}}
-                    change(next,false,false)
+                    if(next.toString()!=doc.json.toString()){if(!edited){doc.record();edited=true};change(next,false,false)}
                 };lastX=event.x;lastY=event.y
             }
             MotionEvent.ACTION_UP->{if(!pinched&&!edited&&!game&&!playing&&abs(event.x-startX)+abs(event.y-startY)<ui.dp(8)){

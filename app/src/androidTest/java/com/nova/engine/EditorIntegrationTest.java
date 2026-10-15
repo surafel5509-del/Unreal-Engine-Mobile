@@ -73,6 +73,10 @@ public class EditorIntegrationTest {
         } while (System.currentTimeMillis() < deadline);
         File screenshot = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(), "editor-tested.png");
         try (FileOutputStream output = new FileOutputStream(screenshot)) { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); }
+        Bitmap review=Bitmap.createScaledBitmap(bitmap,960,Math.max(1,bitmap.getHeight()*960/bitmap.getWidth()),true);
+        File reviewFile=new File(screenshot.getParentFile(),"editor-review.jpg");
+        try(FileOutputStream output=new FileOutputStream(reviewFile)) {review.compress(Bitmap.CompressFormat.JPEG,65,output);}
+        if(review!=bitmap) review.recycle();
         String detail = "pixels=" + coloredPixels + " viewport=" + bounds + " bitmap=" + bitmap.getWidth() + "x" + bitmap.getHeight()
             + " center=" + Integer.toHexString(bitmap.getPixel(bounds.centerX(), bounds.centerY()))
             + " stats=" + NativeBridge.INSTANCE.nativeExecConsole("stats");
