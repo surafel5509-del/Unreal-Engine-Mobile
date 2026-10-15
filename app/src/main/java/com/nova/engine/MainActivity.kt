@@ -121,7 +121,7 @@ class MainActivity : Activity() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (nativeAlive && level >= TRIM_MEMORY_RUNNING_LOW) editor.trimMemory()
+        if (nativeAlive && (level == TRIM_MEMORY_RUNNING_LOW || level == TRIM_MEMORY_RUNNING_CRITICAL || level >= TRIM_MEMORY_BACKGROUND)) editor.trimMemory()
     }
 
     override fun onResume() {
@@ -134,7 +134,7 @@ class MainActivity : Activity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (::editor.isInitialized && nativeAlive) editor.rebuild()
+        if (::editor.isInitialized && nativeAlive) editor.requestLayout()
     }
 
     override fun onPause() {

@@ -27,7 +27,13 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
     private val exportRequested:(String)->Unit={},private val importRequested:()->Unit={}) : LinearLayout(context) {
     private val ui=EditorUi(context)
     private val store=ProjectStore(context)
-    private var doc=EditorDocument(runCatching {store.load(true)}.getOrElse {SceneTemplates.island()})
+    private var recoveryBlocked=false
+    private var startupWarning:String?=null
+    private var doc=EditorDocument(runCatching {store.load(true)}.getOrElse {
+        recoveryBlocked=true
+        startupWarning="Your scene could not be read. Original files have not been changed. A temporary scene is open; Save creates a separate recovery scene. You can also import a backup."
+        SceneTemplates.blank()
+    })
     private var playing=false; private var game=false; private var mode="Move";private var axis="Free"
     private var dockTab="Assets";private var category="Meshes";private var query=""
     private lateinit var workspace:SplitWorkspace
@@ -42,7 +48,7 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
         lastStats=NativeBridge.nativeExecConsole("stats")
         val fps=Regex("fps=([0-9.]+)").find(lastStats)?.groupValues?.get(1)?.toDoubleOrNull()?.roundToInt()?:0
         val cpu=Regex("cpu_ms=([0-9.]+)").find(lastStats)?.groupValues?.get(1)?.toDoubleOrNull()?:0.0
-        statusText?.text="  ● ${if(playing) "RUNNING" else "READY"}   •   ${doc.objects.length()}/32 objects   •   $fps FPS   •   CPU ${"%.1f".format(cpu)} ms    |    Android · GLES"
+        statusText?.text="  ● ${if(playing) "RUNNING" else "READY"}   •   ${doc.objects.length()}/32 objects   •   $fps FPS   •   Native ${"%.1f".format(cpu)} ms    |    Android · GLES"
         hud?.text="${if(game) "GAME PREVIEW" else "SCENE"}   /   $fps FPS"
         if(dockTab=="Profiler") refreshDock()
         ticks++;if(ticks%30==0 && doc.dirty) saveRecovery()
@@ -55,6 +61,7 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
         log("Nova Studio 0.3 • ${NativeBridge.nativeExecConsole("graphics")}")
         log("Opened ${store.projectName} / ${store.sceneName}")
         installGestures();rebuild()
+        (startupWarning?:store.warning)?.let { message -> log(message);post { AlertDialog.Builder(context).setTitle("Scene recovery").setMessage(message).setPositiveButton("OK",null).show() } }
     }
     private fun lp(w:Int,h:Int,weight:Float=0f)=LayoutParams(w,h,weight)
     private fun button(label:String,key:String=label,icon:String?=null,action:()->Unit):View = ui.button(label,key,icon,action).also {actions[key]=it}
@@ -203,7 +210,7 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
     private fun setGame(value:Boolean){game=value;workspace.game=value;actions["joystick"]?.visibility=if(value)VISIBLE else GONE;NativeBridge.nativeExecConsole("view ${if(value)"game" else "scene"}")
         for(key in listOf("scene","game")){val active=(key=="game")==value;(actions[key] as? LinearLayout)?.let{val icon=it.getChildAt(0) as StudioIcon;icon.tint=if(active)StudioColors.blue else StudioColors.muted;icon.invalidate();it.setBackgroundColor(if(active)StudioColors.raised else StudioColors.panel)}}}
     private fun camera():JSONObject=doc.json.optJSONObject("camera")?:SceneTemplates.camera()
-    private fun setCamera(value:JSONObject){doc.json.put("camera",value)}
+    private fun setCamera(value:JSONObject){doc.json.put("camera",value);doc.markDirty();titleText?.text="${store.projectName} / ${store.sceneName} •"}
     private fun applyCamera(){val c=camera();val values=listOf("yaw","pitch","distance","x","y","z").map{key->
         val fallback=SceneTemplates.camera().getDouble(key);val v=c.optDouble(key,fallback);if(v.isFinite())v else fallback}
         val yaw=values[0].coerceIn(-360.0,360.0);val pitch=values[1].coerceIn(-80.0,80.0);val distance=values[2].coerceIn(1.5,40.0)
@@ -213,14 +220,35 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
     private fun frameSelected(){val o=doc.selectedObject()?:return;val c=camera();c.put("x",o.getDouble("x"));c.put("y",o.getDouble("y"));c.put("z",o.getDouble("z"));c.put("distance",if(o.getString("kind")=="Terrain")14.0 else (o.optDouble("scale",1.0)*4).coerceIn(1.5,40.0));setCamera(c);applyCamera()}
     private fun sculpt(amount:Double){edit{next->val heights=next.optJSONArray("terrain")?:SceneTemplates.heights();for(z in 5..11)for(x in 5..11){val d=sqrt(((x-8)*(x-8)+(z-8)*(z-8)).toDouble());if(d<3.5){val i=z*17+x;heights.put(i,(heights.getDouble(i)+amount*(1-d/3.5)).coerceIn(-3.0,3.0))}};next.put("terrain",heights)}}
     private fun smoothTerrain(){edit{next->val old=next.optJSONArray("terrain")?:SceneTemplates.heights();val h=JSONArray(old.toString());for(z in 1..15)for(x in 1..15){var sum=0.0;for(dz in -1..1)for(dx in -1..1)sum+=old.getDouble((z+dz)*17+x+dx);h.put(z*17+x,sum/9)};next.put("terrain",h)}}
-    private fun save():Boolean {return try{store.save(doc.json);store.save(doc.json,true);doc.saved();log("Saved ${store.projectName}/${store.sceneName}");titleText?.text="${store.projectName} / ${store.sceneName}";true}catch(e:Exception){log("Save failed: ${e.message}");toast("Save failed. Your current scene has been kept.");false}}
-    fun saveRecovery(){safe{store.save(doc.json,true)}}
+    private fun save():Boolean {return try{if(recoveryBlocked){store.newScene("Recovery ${System.currentTimeMillis()}",doc.json);recoveryBlocked=false};store.save(doc.json);store.save(doc.json,true);doc.saved();log("Saved ${store.projectName}/${store.sceneName}");titleText?.text="${store.projectName} / ${store.sceneName}";true}catch(e:Exception){log("Save failed: ${e.message}");toast("Save failed. Your current scene has been kept.");false}}
+    fun saveRecovery(){if(!recoveryBlocked)safe{store.save(doc.json,true)}}
     fun trimMemory(){doc.trimHistory(8);while(logs.size>15)logs.removeFirst();NovaRuntime.targetFps=30;log("Low-memory mode: history trimmed, frame cap 30 FPS")}
-    private fun open(value:JSONObject){if(playing)togglePlay();doc=EditorDocument(value);NativeBridge.nativeSetScene(value.toString());applyCamera();refreshAll();log("Opened ${store.sceneName}")}
+    private fun open(value:JSONObject){if(playing)togglePlay();recoveryBlocked=false;doc=EditorDocument(value);NativeBridge.nativeSetScene(value.toString());applyCamera();refreshAll();log("Opened ${store.sceneName}")}
     private fun askName(title:String,default:String,action:(String)->Unit){val input=EditText(context).apply{setText(default);setSingleLine();selectAll()};AlertDialog.Builder(context).setTitle(title).setView(input).setPositiveButton("Create"){_,_->safe{val value=input.text.toString().trim();require(store.validName(value)){"Use letters, numbers, spaces, - or _ (1–40)"};action(value)}}.setNegativeButton("Cancel",null).show()}
     private fun newScene(){askName("Scene name","New Scene"){name->AlertDialog.Builder(context).setTitle("Scene template").setItems(arrayOf("Empty scene","Emerald Valley")){_,i->safe{if(save()){val value=if(i==0)SceneTemplates.blank()else SceneTemplates.island();store.newScene(name,value);open(value)}}}.show()}}
-    private fun projects(){val entries=store.projects();AlertDialog.Builder(context).setTitle("Projects").setItems((entries.map{it.second}+"+ Create project").toTypedArray()){_,i->safe{if(i==entries.size)askName("Project name","New Project"){name->if(save()){store.create(name);open(store.load())}}else{if(save())open(store.openProject(entries[i].first))}}.show()}
-    fun importProject(text:String){safe{if(save()){open(store.importProject(text));log("Imported validated JSON project")}}}
+    private fun projects() {
+        val entries=store.projects()
+        AlertDialog.Builder(context).setTitle("Projects")
+            .setItems((entries.map { it.second }+"+ Create project").toTypedArray()) { _, index ->
+                safe {
+                    if(index==entries.size) {
+                        askName("Project name","New Project") { name ->
+                            if(save()) { store.create(name);open(store.load()) }
+                        }
+                    } else if(save()) {
+                        open(store.openProject(entries[index].first))
+                    }
+                }
+            }.show()
+    }
+    fun importProject(text:String) {
+        safe {
+            if(recoveryBlocked || save()) {
+                open(store.importProject(text))
+                log("Imported validated JSON project")
+            }
+        }
+    }
     private fun buildMenu(){output="ANDROID PROJECT CHECK\nProject: ${store.projectName}\nScene: ${store.sceneName}\nObjects: ${doc.objects.length()} / 32\nValidation: ${NativeBridge.nativeValidateScene(doc.json.toString())}\nRenderer: ${NativeBridge.nativeExecConsole("graphics")}\nTarget: Android 5+ / minSdk 21\n\nJSON export includes scenes, prefabs and console scripts. It is NOT an APK.\nAPK compilation requires the repository's Gradle/NDK GitHub Actions workflow. No on-device compiler is bundled."
         dockTab="Output";if(game)setGame(false);refreshDock()
         AlertDialog.Builder(context).setTitle("Build & export").setItems(arrayOf("Export project JSON…","Import project JSON…","Open GitHub APK build workflow","View build report")){_,i->safe{when(i){0->{if(save())exportRequested(store.exportProject())};1->importRequested();2->context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://github.com/surafel5509-del/Unreal-Engine-Mobile/actions/workflows/android-apk.yml")));else->refreshDock()}}}.show()

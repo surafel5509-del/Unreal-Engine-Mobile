@@ -471,7 +471,7 @@ void Engine::registerConsoleCommands() {
         for (usize i = 0; i < m_editorObjects.size(); ++i) {
             const auto& object = m_editorObjects[i];
             const auto& p = object.transform.position;
-            out << i << " " << (object.mesh == renderer::BuiltinMesh::kCube ? "Cube" : "Triangle")
+            out << i << " " << ([](renderer::BuiltinMesh mesh) { constexpr const char* names[]={"None","Triangle","Cube","Plane","Cone","Sphere","Tree","House","Terrain"}; return names[static_cast<usize>(mesh)]; })(object.mesh)
                 << " position=" << p.x << "," << p.y << "," << p.z
                 << " scale=" << object.transform.scale.x << "\n";
         }

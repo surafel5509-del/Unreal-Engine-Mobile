@@ -41,6 +41,7 @@ class EditorDocument(initial: JSONObject) {
         undo.addLast(Snapshot(json.toString(),selected)); redo.removeLast()
         json=JSONObject(target.json); selected=target.selected.coerceIn(0,maxOf(0,objects.length()-1)); dirty=true; return true
     }
+    fun markDirty() { dirty=true }
     fun saved() { dirty=false }
     fun trimHistory(count: Int) { while(undo.size>count) undo.removeFirst(); while(redo.size>count) redo.removeFirst() }
 }
