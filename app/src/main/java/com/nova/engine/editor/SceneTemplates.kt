@@ -11,7 +11,7 @@ object SceneTemplates {
         for (k in listOf("x", "y", "z", "rx", "ry", "rz")) put(k, 0.0)
         put("scale", 1.0); put("r", 1.0); put("g", 1.0); put("b", 1.0)
     }
-    fun camera(yaw: Double = 30.0, pitch: Double = 28.0, distance: Double = 13.0) = JSONObject().apply {
+    fun camera(yaw: Double = 30.0, pitch: Double = 28.0, distance: Double = 9.0) = JSONObject().apply {
         put("yaw", yaw); put("pitch", pitch); put("distance", distance)
         put("x", 0.0); put("y", 0.3); put("z", 0.0)
     }

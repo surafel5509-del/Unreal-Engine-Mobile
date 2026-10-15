@@ -10,7 +10,7 @@ import kotlin.math.roundToInt
 class SplitWorkspace(context:Context,val left:View,val center:View,val right:View,val bottom:View):ViewGroup(context) {
     private val ui=EditorUi(context)
     private val prefs=context.getSharedPreferences("studio-layout",Context.MODE_PRIVATE)
-    private var leftDp=prefs.getInt("left",145);private var rightDp=prefs.getInt("right",210);private var dockDp=prefs.getInt("dock",116)
+    private var leftDp=prefs.getInt("left",110);private var rightDp=prefs.getInt("right",180);private var dockDp=prefs.getInt("dock",100)
     private var lw=0;private var rw=0;private var dh=0;private var topH=0
     var game=false;set(value){field=value;requestLayout()}
     private fun splitter(name:String,change:(Float,Float)->Unit)=View(context).apply {
@@ -27,7 +27,7 @@ class SplitWorkspace(context:Context,val left:View,val center:View,val right:Vie
     private val b=splitter("inspector"){dx,_->rightDp-=(dx/resources.displayMetrics.density).roundToInt()}
     private val c=splitter("assets"){_,dy->dockDp-=(dy/resources.displayMetrics.density).roundToInt()}
     init {for(v in listOf(left,center,right,bottom,a,b,c))addView(v)}
-    fun reset(){leftDp=145;rightDp=210;dockDp=116;prefs.edit().clear().apply();requestLayout()}
+    fun reset(){leftDp=110;rightDp=180;dockDp=100;prefs.edit().clear().apply();requestLayout()}
     override fun onMeasure(w:Int,h:Int){
         val width=MeasureSpec.getSize(w);val height=MeasureSpec.getSize(h);val gap=ui.dp(8)
         val available=width-2*gap;val minCenter=minOf(ui.dp(200),available/2)

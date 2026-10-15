@@ -98,7 +98,7 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
         tabs.addView(iconButton("Save scene","save","save"){save()});tabs.addView(iconButton("Undo","undo","undo"){if(doc.undo()){refreshAll();applyCamera()}else toast("Nothing to undo")})
         tabs.addView(iconButton("Redo","redo","redo"){if(doc.redo()){refreshAll();applyCamera()}else toast("Nothing to redo")})
         tabs.addView(iconButton("Import JSON project","import","import"){importRequested()})
-        top.addView(ui.horizontal(tabs),lp(0,ui.dp(52),1f));addView(top,lp(-1,ui.dp(52)))
+        top.addView(ui.horizontal(tabs),lp(0,ui.dp(48),1f));addView(top,lp(-1,ui.dp(48)))
         val toolRow=ui.row().apply{setBackgroundColor(StudioColors.raised)}
         toolRow.addView(button("Add","add","plus"){addMenu()})
         for(tool in listOf("Move","Rotate","Scale","Orbit")) toolRow.addView(button(tool,tool.lowercase(),tool.lowercase()){mode=tool;refreshTools()})
@@ -110,8 +110,8 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
         val search=EditText(context).apply{hint="Search objects";setHintTextColor(StudioColors.muted);setTextColor(StudioColors.text);textSize=11f;setSingleLine();setText(query);setPadding(ui.dp(8),0,ui.dp(8),0);background=ui.shape(StudioColors.background)}
         search.addTextChangedListener(object:TextWatcher{override fun beforeTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){};override fun onTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){query=s.toString();refreshHierarchy()};override fun afterTextChanged(e:Editable?){} })
         left.addView(search,lp(-1,ui.dp(32)));hierarchy=ui.column();left.addView(ui.scroll(hierarchy),lp(-1,0,1f))
-        val center=ui.column();val vh=ui.row();hud=ui.text("SCENE  /  PERSPECTIVE",10f,StudioColors.muted);vh.addView(hud,lp(0,ui.dp(28),1f))
-        vh.addView(ui.text("Y ↑   X →",10f,StudioColors.blue));center.addView(vh,lp(-1,ui.dp(28)))
+        val center=ui.column();val vh=ui.row();hud=ui.text("SCENE  /  PERSPECTIVE",10f,StudioColors.muted);vh.addView(hud,lp(0,ui.dp(24),1f))
+        vh.addView(ui.text("Y ↑   X →",10f,StudioColors.blue));center.addView(vh,lp(-1,ui.dp(24)))
         val frame=FrameLayout(context);frame.addView(viewport,FrameLayout.LayoutParams(-1,-1))
         val pad=NavigationPad(context){x,y->pan(x*.08f,y*.08f)}.apply{tag="joystick";visibility=if(game)VISIBLE else GONE}
         frame.addView(pad,FrameLayout.LayoutParams(ui.dp(80),ui.dp(80),Gravity.BOTTOM or Gravity.START).apply{setMargins(ui.dp(8),0,0,ui.dp(8))});actions["joystick"]=pad
@@ -121,7 +121,7 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
         for(t in listOf("Assets","Console","Output","Profiler"))dockTabs.addView(button(t,"tab_$t",if(t=="Assets")"folder" else if(t=="Console")"console" else "output"){dockTab=t;refreshDock()})
         bottom.addView(ui.horizontal(dockTabs),lp(-1,ui.dp(34)));dock=ui.column();bottom.addView(dock,lp(-1,0,1f))
         workspace=SplitWorkspace(context,left,center,right,bottom);workspace.game=game;addView(workspace,lp(-1,0,1f))
-        statusText=ui.text("Preparing native viewport…",9f,StudioColors.muted);addView(statusText,lp(-1,ui.dp(22)))
+        statusText=ui.text("Preparing native viewport…",9f,StudioColors.muted);addView(statusText,lp(-1,ui.dp(18)))
         refreshAll()
     }
     private fun refreshTools(){
@@ -191,14 +191,14 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
     private fun assetPanel(){
         val row=ui.row();val folders=ui.column();for(folder in listOf("Meshes","Scenes","Prefabs","Scripts")) folders.addView(ui.text(folder,10f,if(folder==category)StudioColors.blue else StudioColors.muted).apply{tag="assets_$folder";minimumHeight=ui.dp(32);setOnClickListener{category=folder;refreshDock()}})
         row.addView(ui.scroll(folders),lp(ui.dp(82),-1))
-        val content=ui.column();val crumbs=ui.row();crumbs.addView(ui.text("Assets  ›  $category",10f,StudioColors.muted),lp(0,ui.dp(26),1f));crumbs.addView(ui.text("+",16f,StudioColors.blue).apply{contentDescription="Create $category asset";setOnClickListener{when(category){"Scenes"->newScene();"Scripts"->askName("Script name","Preview"){editScript(it)};"Prefabs"->saveSelectedPrefab();else->addMenu()}}});content.addView(crumbs)
+        val content=ui.column();val crumbs=ui.row();crumbs.addView(ui.text("Assets  ›  $category",10f,StudioColors.muted),lp(0,ui.dp(20),1f));crumbs.addView(ui.text("+",16f,StudioColors.blue).apply{contentDescription="Create $category asset";setOnClickListener{when(category){"Scenes"->newScene();"Scripts"->askName("Script name","Preview"){editScript(it)};"Prefabs"->saveSelectedPrefab();else->addMenu()}}});content.addView(crumbs)
         val cards=ui.row();val entries=when(category){"Meshes"->SceneTemplates.meshes;"Scenes"->store.scenes();"Prefabs"->store.prefabs();else->store.scripts()}
         if(entries.isEmpty())cards.addView(ui.text("No $category yet. Use + or the Inspector to create one.",11f,StudioColors.muted))
         for(name in entries){val icon=when(category){"Meshes"->name;"Scenes"->"scene";"Prefabs"->"prefab";else->"script"};val card=ui.column().apply{
                 tag=if(category=="Meshes")"add$name" else "asset_${category}_$name";contentDescription="$category: $name";gravity=Gravity.CENTER;background=ui.shape(StudioColors.raised)
-                addView(StudioIcon(context,icon,StudioColors.blue),lp(ui.dp(26),ui.dp(26)));addView(ui.text(name,9f).apply{gravity=Gravity.CENTER;maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END})
+                addView(StudioIcon(context,icon,StudioColors.blue),lp(ui.dp(22),ui.dp(22)));addView(ui.text(name,9f).apply{gravity=Gravity.CENTER;maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END})
                 setOnClickListener{safe{when(category){"Meshes"->addObject(name);"Scenes"->{if(save())open(store.openScene(name))};"Prefabs"->addPrefab(store.prefab(name));else->editScript(name)}}}
-            };cards.addView(card,lp(ui.dp(74),ui.dp(52)).apply{setMargins(ui.dp(4),0,ui.dp(4),0)})}
+            };cards.addView(card,lp(ui.dp(74),ui.dp(44)).apply{setMargins(ui.dp(4),0,ui.dp(4),0)})}
         content.addView(ui.horizontal(cards),lp(-1,0,1f));row.addView(content,lp(0,-1,1f));dock.addView(row,lp(-1,-1))
     }
     private fun saveSelectedPrefab() {
@@ -217,9 +217,13 @@ class EditorView(context:Context,private val viewport:NovaSurfaceView,
     private fun setGame(value:Boolean){game=value;workspace.game=value;actions["joystick"]?.visibility=if(value)VISIBLE else GONE;NativeBridge.nativeExecConsole("view ${if(value)"game" else "scene"}")
         for(key in listOf("scene","game")){val active=(key=="game")==value;(actions[key] as? LinearLayout)?.let{val icon=it.getChildAt(0) as StudioIcon;icon.tint=if(active)StudioColors.blue else StudioColors.muted;icon.invalidate();it.setBackgroundColor(if(active)StudioColors.raised else StudioColors.panel)}}}
     private fun camera():JSONObject=doc.json.optJSONObject("camera")?:SceneTemplates.camera()
-    private fun setCamera(value:JSONObject){doc.json.put("camera",value);doc.markDirty();titleText?.text="${store.projectName} / ${store.sceneName} •"}
-    private fun applyCamera(){val c=camera();val values=listOf("yaw","pitch","distance","x","y","z").map{key->
-        val fallback=SceneTemplates.camera().getDouble(key);val v=c.optDouble(key,fallback);if(v.isFinite())v else fallback}
+    private fun setCamera(value:JSONObject){
+        doc.json.put("camera",value)
+        if(!doc.dirty) titleText?.text="${store.projectName} / ${store.sceneName} •"
+        doc.markDirty()
+    }
+    private fun applyCamera(){val c=camera();val defaults=SceneTemplates.camera();val values=listOf("yaw","pitch","distance","x","y","z").map{key->
+        val fallback=defaults.getDouble(key);val v=c.optDouble(key,fallback);if(v.isFinite())v else fallback}
         val yaw=values[0].coerceIn(-360.0,360.0);val pitch=values[1].coerceIn(-80.0,80.0);val distance=values[2].coerceIn(1.5,40.0)
         NativeBridge.nativeExecConsole("orbit $yaw $pitch $distance ${values[3].coerceIn(-100.0,100.0)} ${values[4].coerceIn(-100.0,100.0)} ${values[5].coerceIn(-100.0,100.0)}")
     }

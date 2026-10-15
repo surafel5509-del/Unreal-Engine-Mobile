@@ -11,6 +11,7 @@ import org.json.JSONObject;
 import com.nova.engine.editor.ProjectStore;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.FileOutputStream;
+import java.io.ByteArrayOutputStream;
 import android.view.View;
 import android.view.MotionEvent;
 import androidx.lifecycle.Lifecycle;
@@ -74,9 +75,12 @@ public class EditorIntegrationTest {
         } while (System.currentTimeMillis() < deadline);
         File screenshot = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(), "editor-tested.png");
         try (FileOutputStream output = new FileOutputStream(screenshot)) { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); }
-        Bitmap review=Bitmap.createScaledBitmap(bitmap,960,Math.max(1,bitmap.getHeight()*960/bitmap.getWidth()),true);
+        Bitmap review=Bitmap.createScaledBitmap(bitmap,720,Math.max(1,bitmap.getHeight()*720/bitmap.getWidth()),true);
         File reviewFile=new File(screenshot.getParentFile(),"editor-review.jpg");
-        try(FileOutputStream output=new FileOutputStream(reviewFile)) {review.compress(Bitmap.CompressFormat.JPEG,65,output);}
+        ByteArrayOutputStream jpeg=new ByteArrayOutputStream();
+        int quality=65;
+        do {jpeg.reset();review.compress(Bitmap.CompressFormat.JPEG,quality,jpeg);quality-=8;} while(jpeg.size()>21000 && quality>0);
+        if(jpeg.size()<=21000) try(FileOutputStream output=new FileOutputStream(reviewFile)) {output.write(jpeg.toByteArray());}
         if(review!=bitmap) review.recycle();
         String detail = "pixels=" + coloredPixels + " viewport=" + bounds + " bitmap=" + bitmap.getWidth() + "x" + bitmap.getHeight()
             + " center=" + Integer.toHexString(bitmap.getPixel(bounds.centerX(), bounds.centerY()))
