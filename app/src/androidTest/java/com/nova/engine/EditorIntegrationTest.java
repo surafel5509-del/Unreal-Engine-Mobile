@@ -12,6 +12,7 @@ import com.nova.engine.editor.ProjectStore;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.FileOutputStream;
 import android.view.View;
+import android.view.MotionEvent;
 import androidx.lifecycle.Lifecycle;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -112,6 +113,22 @@ public class EditorIntegrationTest {
             scenario.onActivity(activity -> assertEquals(Configuration.ORIENTATION_LANDSCAPE,activity.getResources().getConfiguration().orientation));
             String graphics = NativeBridge.INSTANCE.nativeExecConsole("graphics");
             assertTrue(graphics, graphics.contains(Build.VERSION.SDK_INT >= 26 ? "OpenGL ES 3" : "OpenGL ES 2"));
+            assertTrue(Integer.parseInt(NativeBridge.INSTANCE.nativeExecConsole("pick 0.5 0.5"))>=0);
+            assertEquals("-1",NativeBridge.INSTANCE.nativeExecConsole("pick -1 0"));
+            final int[] oldWidth={0};
+            scenario.onActivity(activity -> {
+                View root=activity.getWindow().getDecorView();
+                oldWidth[0]=root.findViewWithTag("viewport").getWidth();
+                View splitter=root.findViewWithTag("hierarchy");assertNotNull(splitter);
+                long now=android.os.SystemClock.uptimeMillis();
+                for(int action : new int[]{MotionEvent.ACTION_DOWN,MotionEvent.ACTION_MOVE,MotionEvent.ACTION_UP}) {
+                    MotionEvent event=MotionEvent.obtain(now,now+action*20,action,action==MotionEvent.ACTION_DOWN?0:30,0,0);
+                    splitter.dispatchTouchEvent(event);event.recycle();
+                }
+            });
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            scenario.onActivity(activity -> assertTrue(activity.getWindow().getDecorView().findViewWithTag("viewport").getWidth()!=oldWidth[0]));
+            waitForFrames();
             int initial=objects(); assertTrue(initial>10 && initial<30);
             click(scenario,"addCube"); assertEquals(initial+1,objects());
             click(scenario,"undo"); assertEquals(initial,objects());

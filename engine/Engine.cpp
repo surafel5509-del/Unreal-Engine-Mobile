@@ -455,7 +455,7 @@ void Engine::registerConsoleCommands() {
         auto a=inverseVP*math::Vec4(xy[0]*2-1,xy[1]*2-1,0,1);
         auto b=inverseVP*math::Vec4(xy[0]*2-1,xy[1]*2-1,1,1);
         const math::Vec3 origin(a/a.w), direction=glm::normalize(math::Vec3(b/b.w)-origin);
-        float nearest=10000; int selected=-1;
+        float nearest=glm::length(math::Vec3(b/b.w)-origin); int selected=-1;
         for(usize i=0;i<m_editorObjects.size();++i) {
             const auto& object=m_editorObjects[i]; if(!object.enabled) continue;
             const auto inverse=math::inverse(object.transform.localMatrix());
