@@ -8,7 +8,8 @@
 | 8.0+ / API 26+ | EGL OpenGL ES 3 | Retry with ES 2 config/context |
 
 The APK contains armeabi-v7a, arm64-v8a, x86 and x86_64, uses minimum SDK 21,
-and does **not** link libvulkan.so. The GLES backend links only EGL/GLESv2
+and does **not** link libvulkan.so. Native ELF load segments are 16 KiB aligned;
+libraries use extracted packaging to avoid older AGP ZIP-mapping restrictions. The GLES backend links only EGL/GLESv2
 platform libraries for graphics; the ES 3 context can execute the common ES 2
 API and GLSL ES 1.00 shaders. There are no ES 3-only rendering effects yet.
 

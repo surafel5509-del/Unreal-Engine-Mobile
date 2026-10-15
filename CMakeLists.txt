@@ -85,6 +85,9 @@ if(ANDROID)
 
     # JNI glue keeps exceptions (engine core is -fno-exceptions).
     target_compile_options(nova PRIVATE -fvisibility=hidden)
+    # Compatible ELF segments for 16 KiB-page Android devices as well as 4 KiB.
+    # The C++ runtime is linked statically; there is no unaligned shared STL.
+    target_link_options(nova PRIVATE "-Wl,-z,max-page-size=16384")
 
     find_library(nova_log_lib log REQUIRED)
     find_library(nova_android_lib android REQUIRED)

@@ -129,6 +129,11 @@ jobs:
             fi
             grep -q 'libEGL.so' "$RUNNER_TEMP/deps-$abi.txt"
             grep -q 'libGLESv2.so' "$RUNNER_TEMP/deps-$abi.txt"
+            "$READELF" -lW "$RUNNER_TEMP/libnova-$abi.so" | awk '$1 == "LOAD" { print $NF }' > "$RUNNER_TEMP/align-$abi.txt"
+            test -s "$RUNNER_TEMP/align-$abi.txt"
+            if grep -v '^0x4000$' "$RUNNER_TEMP/align-$abi.txt"; then
+              echo "::error::Native ELF segments must be 16 KiB aligned: $abi"; exit 1
+            fi
           done
           for shader in background.vert background.frag triangle.vert triangle.frag; do
             unzip -p "$APK" "assets/shaders/$shader.spv" > "$RUNNER_TEMP/$shader.spv"
@@ -219,8 +224,10 @@ jobs:
         include:
           - api: 21
             arch: x86
+            target: default
           - api: 26
             arch: x86_64
+            target: google_apis
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -245,7 +252,7 @@ jobs:
         with:
           api-level: ${{ matrix.api }}
           arch: ${{ matrix.arch }}
-          target: default
+          target: ${{ matrix.target }}
           profile: Nexus 5
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
@@ -253,6 +260,12 @@ jobs:
       - name: Report test result
         if: always()
         run: |
+          if [ -f device-run.log ]; then
+            tail -30 device-run.log | while IFS= read -r line; do echo "::notice title=Device runner::${line}"; done
+          fi
+          if [ ! -f device-test.log ]; then
+            echo "::error::Emulator setup or APK installation failed before instrumentation"
+          fi
           if [ -f device-test.log ]; then
             tail -60 device-test.log >> "$GITHUB_STEP_SUMMARY"
             if ! grep -q 'OK (1 test)' device-test.log; then
@@ -265,6 +278,7 @@ jobs:
           name: device-test-api-${{ matrix.api }}
           path: |
             device-test.log
+            device-run.log
             device-logcat.log
             device-errors.log
             editor-screenshot.png

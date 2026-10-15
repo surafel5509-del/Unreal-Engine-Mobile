@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+exec > >(tee device-run.log) 2>&1
 # Always retain diagnostics, including when install/instrumentation fails.
 trap 'adb logcat -d > device-logcat.log; adb exec-out screencap -p > editor-screenshot.png' EXIT
 adb install -r apks/nova-engine-debug.apk
