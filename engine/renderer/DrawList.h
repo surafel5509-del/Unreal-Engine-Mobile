@@ -32,6 +32,7 @@ enum class BuiltinMesh : core::u8 {
     kNone = 0,
     kTriangle = 1,
     kCube = 2,
+    kPlane = 3, kCone = 4, kSphere = 5, kTree = 6, kHouse = 7, kTerrain = 8,
 };
 
 /// Component marking an entity as drawable with a renderer-owned mesh.

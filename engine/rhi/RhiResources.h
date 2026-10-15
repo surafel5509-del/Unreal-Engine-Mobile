@@ -18,6 +18,7 @@ public:
     virtual ~IBuffer() = default;
     virtual const BufferDesc& desc() const = 0;
     virtual void* mappedData() const = 0;
+    virtual void markDirty() {}
 };
 
 /// A GPU texture. Swapchain backbuffers are exposed as ITexture so passes

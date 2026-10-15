@@ -1,4 +1,6 @@
 #include "Engine.h"
+#include "editor_core/Picking.h"
+#include <algorithm>
 
 #include "core/Assert.h"
 
@@ -198,6 +200,8 @@ void Engine::createDemoScene() {
 std::string Engine::setScene(const std::string& json) {
     auto parsed = editor::parseScene(json);
     if (!parsed) return "error: " + parsed.error();
+    auto terrain = editor::parseTerrain(json);
+    if (!terrain) return "error: " + terrain.error();
     std::lock_guard<std::mutex> guard(m_mutex);
     if (!m_initialized) return "error: engine not initialized";
     if (m_world.isAlive(m_demoEntity)) m_world.destroy(m_demoEntity);
@@ -205,11 +209,12 @@ std::string Engine::setScene(const std::string& json) {
     for (auto entity : m_editorEntities) m_world.destroy(entity);
     m_editorEntities.clear();
     m_editorObjects = std::move(parsed.value());
+    m_renderer.setTerrain(terrain.value());
     for (const auto& object : m_editorObjects) {
         const auto entity = m_world.create();
         m_world.add<scene::Transform>(entity, object.transform);
-        m_world.add<scene::Bounds>(entity, scene::Bounds{math::Vec3(0.0f), math::Vec3(0.75f)});
-        m_world.add<renderer::MeshRef>(entity, renderer::MeshRef{object.mesh, object.tint});
+        m_world.add<scene::Bounds>(entity, renderer::builtinBounds(object.mesh));
+        if(object.enabled) m_world.add<renderer::MeshRef>(entity, renderer::MeshRef{object.mesh, object.tint});
         m_editorEntities.push_back(entity);
     }
     m_hierarchy.reset();
@@ -230,7 +235,7 @@ bool Engine::updateScene(f32 width, f32 height, renderer::SceneSnapshot& snapsho
     for (usize i = 0; i < m_editorEntities.size(); ++i) {
         if (auto* transform = m_world.get<scene::Transform>(m_editorEntities[i])) {
             *transform = m_editorObjects[i].transform;
-            if (m_playing) transform->rotation = math::quatRotationY(m_engineTime * 0.6f) * transform->rotation;
+            if (m_playing && m_editorObjects[i].spin) transform->rotation = math::quatRotationY(m_engineTime * 0.6f) * transform->rotation;
         }
     }
     renderer::SceneStageInput stageInput{};
@@ -418,6 +423,49 @@ EngineStats Engine::stats() const {
 }
 
 void Engine::registerConsoleCommands() {
+    m_console.registerCommand("view", "view <scene|game>", [this](core::Console::Arguments args) {
+        if(args.size()!=1 || (args[0]!="scene" && args[0]!="game")) return std::string("usage: view scene|game");
+        m_renderer.setGrid(args[0]=="scene"); return std::string("View: ")+args[0];
+    });
+    m_console.registerCommand("orbit", "orbit <yaw pitch distance targetX targetY targetZ>", [this](core::Console::Arguments args) {
+        if(args.size()!=6) return std::string("usage: orbit yaw pitch distance x y z");
+        float v[6]{};
+        for(int i=0;i<6;++i) {
+            char* end=nullptr; v[i]=std::strtof(args[i].c_str(),&end);
+            if(end==args[i].c_str() || *end || !std::isfinite(v[i]) || std::abs(v[i])>1000) return std::string("error: invalid orbit value");
+        }
+        if(v[1]<-80 || v[1]>80 || v[2]<1.5f || v[2]>40) return std::string("error: orbit range");
+        auto* camera=m_world.get<scene::Transform>(m_cameraEntity);
+        if(!camera) return std::string("error: no camera");
+        const auto yaw=math::toRadians(v[0]), pitch=math::toRadians(v[1]);
+        const math::Vec3 target(v[3],v[4],v[5]);
+        camera->position=target+math::Vec3(std::sin(yaw)*std::cos(pitch), std::sin(pitch),std::cos(yaw)*std::cos(pitch))*v[2];
+        camera->rotation=glm::quat_cast(math::inverse(math::lookAt(camera->position,target,math::Vec3(0,1,0))));
+        return std::string("ok");
+    });
+    m_console.registerCommand("pick", "pick <normalized screen x y>", [this](core::Console::Arguments args) {
+        if(args.size()!=2 || !m_device) return std::string("-1");
+        float xy[2]{};
+        for(int i=0;i<2;++i) { char* end=nullptr; xy[i]=std::strtof(args[i].c_str(),&end);
+            if(end==args[i].c_str() || *end || !std::isfinite(xy[i]) || xy[i]<0 || xy[i]>1) return std::string("-1"); }
+        const auto* camera=m_world.get<scene::Camera>(m_cameraEntity);
+        const auto* transform=m_world.get<scene::Transform>(m_cameraEntity);
+        if(!camera || !transform) return std::string("-1");
+        const auto inverseVP=math::inverse(scene::projectionMatrix(*camera)*math::inverse(transform->localMatrix()));
+        auto a=inverseVP*math::Vec4(xy[0]*2-1,xy[1]*2-1,0,1);
+        auto b=inverseVP*math::Vec4(xy[0]*2-1,xy[1]*2-1,1,1);
+        const math::Vec3 origin(a/a.w), direction=glm::normalize(math::Vec3(b/b.w)-origin);
+        float nearest=10000; int selected=-1;
+        for(usize i=0;i<m_editorObjects.size();++i) {
+            const auto& object=m_editorObjects[i]; if(!object.enabled) continue;
+            const auto inverse=math::inverse(object.transform.localMatrix());
+            const math::Vec3 localOrigin(inverse*math::Vec4(origin,1)), localDirection(inverse*math::Vec4(direction,0));
+            if(editor::hitBounds(localOrigin,localDirection,renderer::builtinBounds(object.mesh))<0) continue;
+            const float distance=m_renderer.pick(object.mesh,localOrigin,localDirection);
+            if(distance>=0 && distance<nearest) {nearest=distance; selected=static_cast<int>(i);}
+        }
+        return std::to_string(selected);
+    });
     m_console.registerCommand("scene", "List authored native objects and positions", [this](core::Console::Arguments) {
         std::ostringstream out;
         for (usize i = 0; i < m_editorObjects.size(); ++i) {

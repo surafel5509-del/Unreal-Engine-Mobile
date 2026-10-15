@@ -300,7 +300,7 @@ jobs:
           set -euo pipefail
           gh release delete apk-latest --yes --cleanup-tag || true
           gh release create apk-latest --target "$GITHUB_SHA" \
-            --title "Nova Studio 0.2.0 — GLES editor APK" \
-            --notes "Commit: $GITHUB_SHA. Android 5+ (minSdk 21). ARM32/ARM64/x86/x86_64. OpenGL ES 2 on Android 5–7; ES 3 preferred on Android 8+ with ES 2 fallback. No Vulkan requirement. Scene editor foundation, not a complete Unity replacement. Debug-signed. Emulator integration tests passed on API 21 and 26." \
+            --title "Nova Studio 0.3.0 — GLES editor APK" \
+            --notes "Commit: $GITHUB_SHA. Android 5+ (minSdk 21). ARM32/ARM64/x86/x86_64. OpenGL ES 2 on Android 5–7; ES 3 preferred on Android 8+ with ES 2 fallback. No Vulkan requirement. Landscape workspace, native procedural world, terrain tools, JSON projects and prefabs. Not a complete Unity replacement. Debug-signed. Emulator integration tests passed on API 21 and 26." \
             --prerelease dist/nova-engine-debug.apk dist/nova-engine-debug.apk.sha256
           echo "Download: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/nova-engine-debug.apk" >> "$GITHUB_STEP_SUMMARY"

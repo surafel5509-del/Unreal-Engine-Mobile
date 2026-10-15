@@ -12,53 +12,6 @@ namespace {
 using nova::core::u32;
 using nova::core::usize;
 
-// Interleaved triangle: position (vec3) + color (vec3), Y-up. Colors follow
-// the engine palette: violet, cyan, magenta.
-constexpr std::array<float, 18> kTriangleVertices = {
-    0.0f,  0.75f, 0.0f, 0.486f, 0.302f, 1.0f,   // top     — #7C4DFF
-    -0.75f, -0.65f, 0.0f, 0.0f,  0.898f, 1.0f,  // bottomL — #00E5FF
-    0.75f, -0.65f, 0.0f, 1.0f,  0.302f, 0.553f, // bottomR — #FF4D8D
-};
-
-constexpr std::array<float, 216> kCubeVertices = {
-    -0.500f, -0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
-    0.500f, -0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
-    0.500f, 0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
-    -0.500f, -0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
-    0.500f, 0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
-    -0.500f, 0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
-    0.500f, -0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
-    -0.500f, -0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
-    -0.500f, 0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
-    0.500f, -0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
-    -0.500f, 0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
-    0.500f, 0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
-    -0.500f, -0.500f, -0.500f, 0.450f, 0.550f, 0.880f,
-    -0.500f, -0.500f, 0.500f, 0.450f, 0.550f, 0.880f,
-    -0.500f, 0.500f, 0.500f, 0.450f, 0.550f, 0.880f,
-    -0.500f, -0.500f, -0.500f, 0.450f, 0.550f, 0.880f,
-    -0.500f, 0.500f, 0.500f, 0.450f, 0.550f, 0.880f,
-    -0.500f, 0.500f, -0.500f, 0.450f, 0.550f, 0.880f,
-    0.500f, -0.500f, 0.500f, 0.500f, 0.620f, 0.950f,
-    0.500f, -0.500f, -0.500f, 0.500f, 0.620f, 0.950f,
-    0.500f, 0.500f, -0.500f, 0.500f, 0.620f, 0.950f,
-    0.500f, -0.500f, 0.500f, 0.500f, 0.620f, 0.950f,
-    0.500f, 0.500f, -0.500f, 0.500f, 0.620f, 0.950f,
-    0.500f, 0.500f, 0.500f, 0.500f, 0.620f, 0.950f,
-    -0.500f, 0.500f, 0.500f, 0.800f, 0.850f, 1.000f,
-    0.500f, 0.500f, 0.500f, 0.800f, 0.850f, 1.000f,
-    0.500f, 0.500f, -0.500f, 0.800f, 0.850f, 1.000f,
-    -0.500f, 0.500f, 0.500f, 0.800f, 0.850f, 1.000f,
-    0.500f, 0.500f, -0.500f, 0.800f, 0.850f, 1.000f,
-    -0.500f, 0.500f, -0.500f, 0.800f, 0.850f, 1.000f,
-    -0.500f, -0.500f, -0.500f, 0.300f, 0.380f, 0.600f,
-    0.500f, -0.500f, -0.500f, 0.300f, 0.380f, 0.600f,
-    0.500f, -0.500f, 0.500f, 0.300f, 0.380f, 0.600f,
-    -0.500f, -0.500f, -0.500f, 0.300f, 0.380f, 0.600f,
-    0.500f, -0.500f, 0.500f, 0.300f, 0.380f, 0.600f,
-    -0.500f, -0.500f, 0.500f, 0.300f, 0.380f, 0.600f,
-};
-
 }  // namespace
 
 const char* initErrorMessage(InitError error) {
@@ -130,17 +83,17 @@ nova::Result<void, InitError> Renderer::init(
     rhi::BufferDesc vertexDesc{};
     vertexDesc.usage = rhi::BufferUsage::Vertex;
     vertexDesc.domain = rhi::BufferDomain::HostVisible;
-    vertexDesc.size = sizeof(kTriangleVertices) + sizeof(kCubeVertices);
+    m_heights = defaultTerrain();
+    m_geometry = buildBuiltinGeometry(m_heights);
+    vertexDesc.size = m_geometry.vertices.size() * sizeof(float);
+    vertexDesc.immutable = true;
     vertexDesc.debugName = "nova.triangle.vertices";
     m_vertexBuffer = device.createBuffer(vertexDesc);
     if (m_vertexBuffer == nullptr) {
         shutdown();
         return nova::Result<void, InitError>::failure(InitError::BufferFailed);
     }
-    std::memcpy(m_vertexBuffer->mappedData(), kTriangleVertices.data(),
-                sizeof(kTriangleVertices));
-    std::memcpy(static_cast<u8*>(m_vertexBuffer->mappedData()) + sizeof(kTriangleVertices),
-                kCubeVertices.data(), sizeof(kCubeVertices));
+    std::memcpy(m_vertexBuffer->mappedData(), m_geometry.vertices.data(), vertexDesc.size);
 
     // One persistently mapped UBO per frame slot (matches frames-in-flight),
     // sliced per object: slice 0 is the camera/background block, slices 1..N
@@ -250,22 +203,19 @@ bool Renderer::ensurePipelines(rhi::Format colorFormat) {
     return true;
 }
 
-rhi::IPipeline* Renderer::pipelineFor(BuiltinMesh mesh) const {
-    switch (mesh) {
-        case BuiltinMesh::kTriangle:
-        case BuiltinMesh::kCube: return m_trianglePipeline.get();
-        case BuiltinMesh::kNone: break;
-    }
-    return nullptr;
+void Renderer::setTerrain(const std::vector<float>& heights) {
+    if (heights == m_heights || heights.size() != kTerrainSamples || !m_vertexBuffer) return;
+    m_heights = heights;
+    m_geometry = buildBuiltinGeometry(heights);
+    std::memcpy(m_vertexBuffer->mappedData(), m_geometry.vertices.data(), m_geometry.vertices.size()*sizeof(float));
+    m_vertexBuffer->markDirty();
 }
-
-u32 Renderer::vertexCountFor(BuiltinMesh mesh) {
-    switch (mesh) {
-        case BuiltinMesh::kTriangle: return 3;
-        case BuiltinMesh::kCube: return 36;
-        case BuiltinMesh::kNone: break;
-    }
-    return 0;
+rhi::IPipeline* Renderer::pipelineFor(BuiltinMesh mesh) const {
+    return vertexCountFor(mesh) ? m_trianglePipeline.get() : nullptr;
+}
+u32 Renderer::vertexCountFor(BuiltinMesh mesh) const {
+    const auto id = static_cast<usize>(mesh);
+    return id < m_geometry.ranges.size() ? m_geometry.ranges[id].count : 0;
 }
 
 bool Renderer::render(rhi::FrameInfo& frame, const SceneSnapshot& snapshot) {
@@ -292,6 +242,7 @@ bool Renderer::render(rhi::FrameInfo& frame, const SceneSnapshot& snapshot) {
     base.colorB = math::Vec4(0.008f, 0.012f, 0.031f, 1.0f);  // near black (bottom)
     base.accent = math::Vec4(0.486f, 0.302f, 1.0f, 1.0f);    // #7C4DFF
     base.time = snapshot.timeSeconds;
+    base.pad0 = m_grid ? 1.0f : 0.0f;
     base.aspect = aspect;
 
     auto* uniformBytes = static_cast<nova::core::u8*>(m_uniforms[slot]->mappedData());
@@ -341,7 +292,7 @@ bool Renderer::render(rhi::FrameInfo& frame, const SceneSnapshot& snapshot) {
         commands->bindPipeline(pipeline);
         commands->bindVertexBuffer(m_vertexBuffer.get());
         commands->bindUniformBuffer(0, m_uniforms[slot].get(), offset, sizeof(FrameUniforms));
-        commands->draw(vertexCount, 1, command.mesh == BuiltinMesh::kCube ? 3 : 0);
+        commands->draw(vertexCount, 1, m_geometry.ranges[static_cast<usize>(command.mesh)].first);
         ++draws;
     }
 

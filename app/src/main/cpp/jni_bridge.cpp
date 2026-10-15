@@ -313,4 +313,14 @@ Java_com_nova_engine_NativeBridge_nativeSetScene(JNIEnv* env, jobject, jstring j
     return env->NewStringUTF(result.c_str());
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_nova_engine_NativeBridge_nativeValidateScene(JNIEnv* env, jobject, jstring json) {
+    if (!json || env->GetStringUTFLength(json) > 65536) return env->NewStringUTF("error: scene exceeds 64 KiB");
+    ScopedUtfChars text(env, json);
+    if(!text.isValid()) return env->NewStringUTF("error: unreadable scene");
+    auto objects = nova::editor::parseScene(text.c_str());
+    auto terrain = nova::editor::parseTerrain(text.c_str());
+    const auto result = !objects ? "error: " + objects.error() : (!terrain ? "error: " + terrain.error() : "ok");
+    return env->NewStringUTF(result.c_str());
+}
 }  // extern "C"

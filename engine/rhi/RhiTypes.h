@@ -58,6 +58,7 @@ struct BufferDesc {
     BufferUsage usage = BufferUsage::Vertex;
     BufferDomain domain = BufferDomain::DeviceLocal;
     usize size = 0;
+    bool immutable = false; // vertex data changes only after explicit markDirty()
     const char* debugName = nullptr;
 };
 

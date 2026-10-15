@@ -24,6 +24,7 @@
 #include "core/Result.h"
 #include "core/Types.h"
 #include "renderer/DrawList.h"
+#include "renderer/BuiltinGeometry.h"
 #include "rhi/IDevice.h"
 
 #include <array>
@@ -84,6 +85,10 @@ public:
     /// Returns false when pipelines could not be created for this format.
     bool render(rhi::FrameInfo& frame, const SceneSnapshot& snapshot);
 
+    float pick(BuiltinMesh mesh, math::Vec3 origin, math::Vec3 direction) const { return hitMesh(m_geometry, mesh, origin, direction); }
+    void setTerrain(const std::vector<float>& heights);
+    void setGrid(bool visible) { m_grid = visible; }
+
     bool isInitialized() const { return m_device != nullptr; }
     const RenderStats& stats() const { return m_stats; }
 
@@ -106,7 +111,10 @@ private:
 
     /// GPU resources for a builtin mesh, or nullptr when unsupported.
     rhi::IPipeline* pipelineFor(BuiltinMesh mesh) const;
-    static u32 vertexCountFor(BuiltinMesh mesh);
+    u32 vertexCountFor(BuiltinMesh mesh) const;
+    GeometryAtlas m_geometry;
+    std::vector<float> m_heights;
+    bool m_grid = true;
 
     rhi::IDevice* m_device = nullptr;
 

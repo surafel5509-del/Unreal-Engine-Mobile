@@ -82,4 +82,5 @@ object NativeBridge {
 
     /** Validate and atomically replace the editable scene. Returns "ok" or an error. */
     external fun nativeSetScene(json: String): String
+    external fun nativeValidateScene(json: String): String
 }

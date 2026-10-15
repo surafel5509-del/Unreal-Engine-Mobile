@@ -1,5 +1,8 @@
 package com.nova.engine
 
+import android.content.Intent
+import android.widget.Toast
+import java.io.File
 import android.content.res.Configuration
 import com.nova.engine.editor.EditorView
 import android.app.Activity
@@ -66,9 +69,59 @@ class MainActivity : Activity() {
             onSurfaceLost = { handleSurfaceLost() }
             touchSink = { event -> inputManager.onTouchEvent(event) }
         }
-        editor = EditorView(this, surfaceView)
+        editor = EditorView(this, surfaceView, ::exportProject, ::importProject)
         setContentView(editor)
         runtime.start()
+    }
+
+    private fun exportProject(json: String) {
+        File(filesDir, "pending-export.json").writeText(json)
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+            putExtra(Intent.EXTRA_TITLE, "nova-project.json")
+        }, 2001)
+    }
+
+    private fun importProject() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "text/plain", "application/octet-stream"))
+        }, 2002)
+    }
+
+    @Deprecated("Framework activity result API retained for Android 5 compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK || data?.data == null) return
+        val uri = data.data!!
+        Thread {
+            try {
+                if (requestCode == 2001) {
+                    val pending = File(filesDir, "pending-export.json")
+                    contentResolver.openOutputStream(uri, "wt")?.use { out -> pending.inputStream().use { it.copyTo(out) } }
+                        ?: error("Cannot open destination")
+                    pending.delete()
+                    runOnUiThread { Toast.makeText(this, "Project JSON exported (not an APK)", Toast.LENGTH_LONG).show() }
+                } else if (requestCode == 2002) {
+                    val text = contentResolver.openInputStream(uri)?.use { input ->
+                        val bytes = ByteArray(524289); var count = 0
+                        while (count < bytes.size) { val n = input.read(bytes, count, bytes.size-count); if (n < 0) break; count += n }
+                        require(count <= 524288) { "Project exceeds 512 KiB" }
+                        String(bytes, 0, count, Charsets.UTF_8)
+                    } ?: error("Cannot read document")
+                    runOnUiThread { if (!isDestroyed && nativeAlive) editor.importProject(text) }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { if (!isDestroyed) Toast.makeText(this, e.message ?: "File operation failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (nativeAlive && level >= TRIM_MEMORY_RUNNING_LOW) editor.trimMemory()
     }
 
     override fun onResume() {

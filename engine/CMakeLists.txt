@@ -25,6 +25,7 @@ set(NOVA_RHI_SOURCES
 set(NOVA_RENDERER_SOURCES
     renderer/DrawList.cpp
     renderer/Renderer.cpp
+    renderer/BuiltinGeometry.cpp
 )
 
 set(NOVA_ASSETS_SOURCES

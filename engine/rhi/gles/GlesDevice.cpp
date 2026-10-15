@@ -16,6 +16,8 @@ public:
     explicit Buffer(const BufferDesc& desc) : description(desc), bytes(desc.size) {}
     const BufferDesc& desc() const override { return description; }
     void* mappedData() const override { return const_cast<u8*>(bytes.data()); }
+    void markDirty() override { ++revision; }
+    u64 revision = 1;
     BufferDesc description;
     std::vector<u8> bytes;
 };
@@ -70,6 +72,7 @@ public:
                 if (parking != EGL_NO_SURFACE && eglMakeCurrent(display, parking, parking, context)) {
                     ++generation;
                     glGenBuffers(1, &streamBuffer);
+                    glGenBuffers(1, &atlasBuffer);
                     name = std::string("OpenGL ES ") + (major == 3 ? "3" : "2") + " / " +
                         reinterpret_cast<const char*>(glGetString(GL_RENDERER));
                     NOVA_LOG_INFO("gles: ready: %s (%s)", name.c_str(), glGetString(GL_VERSION));
@@ -194,6 +197,7 @@ public:
         glUniform4fv(glGetUniformLocation(program, "uAccent"), 1, &data.accent[0]);
         glUniform1f(glGetUniformLocation(program, "uTime"), data.time);
         glUniform1f(glGetUniformLocation(program, "uAspect"), data.aspect);
+        glUniform1f(glGetUniformLocation(program, "uGrid"), data.pad0);
     }
     void draw(u32 count, u32 instances, u32 first, u32) override {
         if (!active || instances != 1) return;
@@ -207,7 +211,13 @@ public:
             glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
         } else {
             if (!vertex) return;
-            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertex->bytes.size()), vertex->bytes.data(), GL_STREAM_DRAW);
+            if (vertex->description.immutable) {
+                glBindBuffer(GL_ARRAY_BUFFER, atlasBuffer);
+                if (uploadedVertex != vertex || uploadedRevision != vertex->revision) {
+                    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertex->bytes.size()), vertex->bytes.data(), GL_STATIC_DRAW);
+                    uploadedVertex = vertex; uploadedRevision = vertex->revision;
+                }
+            } else glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertex->bytes.size()), vertex->bytes.data(), GL_STREAM_DRAW);
             for (u32 i = 0; i < binding.attributeCount; ++i) {
                 const auto& attr = binding.attributes[i];
                 glEnableVertexAttribArray(attr.location);
@@ -256,6 +266,7 @@ private:
         if (context != EGL_NO_CONTEXT && eglMakeCurrent(display, parking, parking, context)) {
             for (GLuint program : programs) glDeleteProgram(program);
             glDeleteBuffers(1, &streamBuffer);
+            glDeleteBuffers(1, &atlasBuffer);
         }
         release();
         if (surface != EGL_NO_SURFACE) eglDestroySurface(display, surface);
@@ -263,7 +274,7 @@ private:
         if (context != EGL_NO_CONTEXT) eglDestroyContext(display, context);
         eglTerminate(display);
         surface = parking = EGL_NO_SURFACE; context = EGL_NO_CONTEXT; display = EGL_NO_DISPLAY;
-        programs.clear(); streamBuffer = 0; active = nullptr; vertex = nullptr;
+        programs.clear(); atlasBuffer = 0; uploadedVertex = nullptr; uploadedRevision = 0; streamBuffer = 0; active = nullptr; vertex = nullptr;
     }
     void recover(EGLint error) {
         NOVA_LOG_WARN("gles: EGL error 0x%x; recreating surface/context", error);
@@ -283,7 +294,9 @@ private:
     Backbuffer backbuffer;
     DeviceStats counters{};
     std::string name;
-    GLuint streamBuffer = 0;
+    GLuint streamBuffer = 0, atlasBuffer = 0;
+    const Buffer* uploadedVertex = nullptr;
+    u64 uploadedRevision = 0;
     u64 generation = 0;
     std::vector<GLuint> programs;
     Pipeline* active = nullptr;

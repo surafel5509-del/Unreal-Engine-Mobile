@@ -25,6 +25,8 @@ import kotlin.concurrent.withLock
 class NovaRuntime {
 
     companion object {
+        @Volatile var targetFps = 60
+
         private const val TAG = "NovaRuntime"
 
         /** Longest dt we accept before treating it as a resume stall. */
@@ -160,7 +162,7 @@ class NovaRuntime {
             }
             // Some drivers/emulators do not block in swap even with interval 1.
             // Bound idle editor rendering to ~60 FPS rather than burning CPU.
-            val remaining = 16_666_667L - (System.nanoTime() - now)
+            val remaining = 1_000_000_000L / targetFps.coerceIn(15, 60) - (System.nanoTime() - now)
             if (remaining > 0 && status != NativeBridge.FRAME_SKIPPED) {
                 java.util.concurrent.locks.LockSupport.parkNanos(remaining)
             }
