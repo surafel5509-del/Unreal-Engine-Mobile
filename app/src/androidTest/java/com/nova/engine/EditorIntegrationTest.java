@@ -5,7 +5,6 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.widget.EditText;
-import android.widget.CheckBox;
 import android.content.Context;
 import android.content.res.Configuration;
 import org.json.JSONObject;
@@ -90,6 +89,12 @@ public class EditorIntegrationTest {
         String exported=store.exportProject();
         JSONObject imported=store.importProject(exported);
         assertTrue(imported.getJSONArray("objects").length()>10);
+        File recovery=new File(store.getProjectDir(),"recovery/Main.json");
+        recovery.getParentFile().mkdirs();
+        try(FileOutputStream out=new FileOutputStream(recovery)) {out.write("{broken".getBytes("UTF-8"));}
+        recovery.setLastModified(System.currentTimeMillis()+1000);
+        assertEquals(imported.getJSONArray("objects").length(),store.load(true).getJSONArray("objects").length());
+        assertTrue(recovery.delete());
         String id=store.getProjectId();
         JSONObject hostile=new JSONObject(exported);
         hostile.getJSONObject("scenes").put("../escape", imported);

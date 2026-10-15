@@ -27,7 +27,7 @@ class SplitWorkspace(context:Context,val left:View,val center:View,val right:Vie
     private val b=splitter("inspector"){dx,_->rightDp-=(dx/resources.displayMetrics.density).roundToInt()}
     private val c=splitter("assets"){_,dy->dockDp-=(dy/resources.displayMetrics.density).roundToInt()}
     init {for(v in listOf(left,center,right,bottom,a,b,c))addView(v)}
-    fun reset(){leftDp=145;rightDp=210;dockDp=116;requestLayout()}
+    fun reset(){leftDp=145;rightDp=210;dockDp=116;prefs.edit().clear().apply();requestLayout()}
     override fun onMeasure(w:Int,h:Int){
         val width=MeasureSpec.getSize(w);val height=MeasureSpec.getSize(h);val gap=ui.dp(8)
         val available=width-2*gap;val minCenter=minOf(ui.dp(200),available/2)

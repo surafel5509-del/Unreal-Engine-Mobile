@@ -10,7 +10,8 @@ import android.view.Surface
  *  - Keep JNI thin: only primitives, strings, and framework objects cross the
  *    boundary; all engine state lives on the native side behind one mutex.
  *  - [nativeInit] must be called exactly once per process lifetime before any
- *    other entry point, and [nativeShutdown] exactly once during teardown.
+ *    stateful entry point, and [nativeShutdown] exactly once during teardown.
+ *    [nativeValidateScene] is pure and can run before initialization.
  *  - [nativeFrame] may be called from a dedicated render thread; lifecycle and
  *    input calls are made from the main thread. The native engine serializes
  *    both sides internally.

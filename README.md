@@ -5,15 +5,17 @@ The default APK uses **OpenGL ES 2/3**, not Vulkan, and targets **Android 5.0+**
 It is an early, limited editor—not Unreal Engine, Unity, or a feature-complete
 replacement for either product.
 
-**Version 0.2.0: Nova Studio compatibility editor.**
+**Version 0.3.0: Nova Studio landscape workspace.**
 
 - Android 5–7 (API 21–25): OpenGL ES 2.
 - Android 8+ (API 26+): request OpenGL ES 3; retry ES 2 if unavailable.
 - ARM32, ARM64, x86 and x86_64 in one APK; no `libvulkan.so` load dependency.
-- Native ECS scene rendered through EGL: depth-tested cubes and triangles,
-  transforms, material tint, camera zoom and preview rotation.
-- Responsive hierarchy/viewport/inspector interface, built-in mesh library,
-  console, undo/redo, atomic scene save/load and background recovery save.
+- Native procedural valley: editable terrain, water plane, trees, cabins and rocks.
+- Landscape navy workspace: resizable hierarchy, viewport, inspector and asset dock.
+- Eight mesh types, native ray picking, axis-constrained transforms, orbit/pinch,
+  tint, visibility, rotation preview, 30-entry undo/redo and terrain height tools.
+- Multiple local projects/scenes, prefabs, console command scripts, Android JSON
+  import/export, recovery saves, frame caps and native statistics.
 
 [Editor guide and limits](docs/ANDROID_EDITOR.md) ·
 [Download the latest tested APK](https://github.com/surafel5509-del/Unreal-Engine-Mobile/releases/download/apk-latest/nova-engine-debug.apk)
@@ -37,18 +39,26 @@ See [docs/MILESTONES.md](docs/MILESTONES.md) for the roadmap and
 
 ## 1. What you see when you run it
 
-A dark mobile scene editor opens with a real depth-tested cube in a grid viewport.
-On narrow screens the bottom dock switches between Hierarchy, Inspector, Assets,
-and Console. Wide layouts show hierarchy and inspector alongside the viewport.
+A landscape editor opens with **Emerald Valley**, a small live low-poly 3D scene,
+not a background image or a photorealistic open-world game. Drag the three blue-gray
+panel dividers to resize the workspace; toolbars and asset shelves scroll sideways.
 
-Use **+ Object** or **Assets** to add cubes/triangles, select an object, edit its
-position/rotation/uniform scale, apply a color tint, or drag it in the viewport.
-**Play/Stop** previews rotation without changing authored transforms. **Undo/Redo**
-keeps 30 edit snapshots. **Save/Load** uses app-private JSON; backgrounding saves a
-separate recovery document. This release supports at most 32 objects per scene.
+Tap an object to select it, or use the hierarchy. **Move / Rotate / Scale** and
+**Free / X / Y / Z** control viewport drags. Numeric inspector values apply with
+**Apply**. **Orbit** drags the camera, pinch zooms, and **Frame** centers selection.
+Select Terrain for center-raise/lower, smoothing and height reset. **Game** enlarges
+the preview with a camera-navigation pad; it is not a physics character controller.
+**Play** rotates only objects whose **Rotate during Play** checkbox is enabled.
 
-Console commands: `help`, `stats`, `graphics`, `play`, `stop`, `camera <1.5..20>`,
-`log <message>`, `time`. GLES uses FIFO pacing with an approximately 60 FPS cap.
+**Assets** contains Meshes, Scenes, Prefabs and console Scripts. Tap the project
+name for the project manager. **Save** writes app-private JSON; recovery is separate.
+**Build → Export project JSON** opens Android's file picker for portable backups.
+Import accepts project bundles or single Nova scenes—not models/textures. Export
+is **not an APK compiler**. This release supports 32 objects per scene.
+
+The optional Vulkan source backend remains compile-checked, but the shipped APK
+uses GLES. Physics, shadows, textures, skeletal animation, audio, particles, UI
+design and gameplay scripting remain unimplemented; see the [feature boundaries](docs/ANDROID_EDITOR.md).
 
 ---
 

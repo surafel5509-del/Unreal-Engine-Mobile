@@ -85,7 +85,26 @@ jobs:
           ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace 2>&1 | tee gradle-build.log
 
       - name: Check Android API compatibility
-        run: ./gradlew :app:lintDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew :app:lintDebug --no-daemon --stacktrace 2>&1 | tee gradle-lint.log
+
+      - name: Surface lint errors
+        if: failure()
+        run: |
+          if [ -f app/build/reports/lint-results-debug.xml ]; then
+            python3 - <<'PYLINT'
+          import xml.etree.ElementTree as ET
+          for issue in ET.parse('app/build/reports/lint-results-debug.xml').getroot().findall('issue'):
+              if issue.get('severity') in ('Error', 'Fatal'):
+                  message = issue.get('message', '').replace('\n', ' ')
+                  location = issue.find('location')
+                  where = location.attrib if location is not None else {}
+                  print(f"::error title=lint {issue.get('id')}::{message} {where}")
+          PYLINT
+          elif [ -f gradle-lint.log ]; then
+            tail -70 gradle-lint.log | while IFS= read -r line; do echo "::error title=lint::${line}"; done
+          fi
 
       - name: Surface build errors
         # Runner logs are only visible in the web UI, so re-publish the first
