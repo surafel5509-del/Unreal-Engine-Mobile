@@ -15,6 +15,7 @@
 
 #include <array>
 #include <span>
+#include <string_view>
 
 namespace nova::rhi {
 
@@ -66,6 +67,7 @@ struct ShaderModuleDesc {
     ShaderStage stage = ShaderStage::Vertex;
     std::span<const nova::core::u32> spirv;
     const char* debugName = nullptr;
+    std::string_view glsl; // ES 1.00 source for GLES 2/3; ignored by Vulkan
 };
 
 enum class PrimitiveTopology : nova::core::u8 { TriangleList, LineList, PointList };

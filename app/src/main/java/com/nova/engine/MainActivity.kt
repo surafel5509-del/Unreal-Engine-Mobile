@@ -1,5 +1,7 @@
 package com.nova.engine
 
+import android.content.res.Configuration
+import com.nova.engine.editor.EditorView
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Rect
@@ -15,31 +17,14 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import com.nova.engine.runtime.NovaRuntime
 
-/**
- * Nova Engine host activity.
- *
- * Responsibilities:
- *  - configure immersive fullscreen + keep-screen-on,
- *  - materialize the writable asset tree and initialize the native engine,
- *  - wire [NovaSurfaceView] lifecycle to [NovaRuntime] and the native layer,
- *  - forward key/gamepad input to [InputManager].
- *
- * No runtime permissions are requested: the engine only reads its own APK
- * assets and writes to app-private storage (both permission-free on API 24+).
- * See docs/ARCHITECTURE.md for the threading model.
- *
- * `minSdk` is 24 (Android 7.0). Every API added after that which this activity
- * uses (`WindowInsetsController`, `setDecorFitsSystemWindows`,
- * `getCurrentWindowMetrics`) is gated behind [Build.VERSION] checks with a
- * pre-API-30 fallback, and a device whose driver lacks Vulkan 1.3 gets an
- * explanatory dialog from [showInitFailure] instead of a silent exit.
- */
+/** Android 5+ host for the GLES scene editor; native calls are serialized by Engine. */
 class MainActivity : Activity() {
 
     companion object {
         private const val TAG = "NovaMain"
     }
 
+    private lateinit var editor: EditorView
     private lateinit var surfaceView: NovaSurfaceView
     private lateinit var runtime: NovaRuntime
     private lateinit var inputManager: InputManager
@@ -62,6 +47,7 @@ class MainActivity : Activity() {
             bounds.width(),
             bounds.height(),
             BuildConfig.NOVA_VALIDATION,
+            Build.VERSION.SDK_INT,
         )
         if (initResult != 0) {
             Log.e(TAG, "Native engine init failed with code $initResult")
@@ -79,7 +65,8 @@ class MainActivity : Activity() {
             onSurfaceLost = { handleSurfaceLost() }
             touchSink = { event -> inputManager.onTouchEvent(event) }
         }
-        setContentView(surfaceView)
+        editor = EditorView(this, surfaceView)
+        setContentView(editor)
         runtime.start()
     }
 
@@ -91,8 +78,14 @@ class MainActivity : Activity() {
         runtime.resume()
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::editor.isInitialized && nativeAlive) editor.rebuild()
+    }
+
     override fun onPause() {
         if (nativeAlive) {
+            editor.saveRecovery()
             runtime.pause()
             NativeBridge.nativeOnPause()
         }
@@ -139,7 +132,7 @@ class MainActivity : Activity() {
                     WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         } else {
-            // Android 7-10: the insets-controller API does not exist yet; the
+            // Android 5-10: the insets-controller API does not exist yet; the
             // deprecated visibility flags are the only immersive mode there.
             // IMMERSIVE_STICKY (transient bars on swipe) is the pre-30
             // equivalent of BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE; the
@@ -168,17 +161,11 @@ class MainActivity : Activity() {
             Rect(0, 0, metrics.widthPixels, metrics.heightPixels)
         }
 
-    /**
-     * Explain a failed native init on screen instead of closing silently: with
-     * `minSdk` 24 the common cause is a device whose driver offers no Vulkan 1.3
-     * renderer, which is a device capability, not a crash.
-     */
+    /** Report a driver/init error without assuming a Vulkan requirement. */
     private fun showInitFailure(code: Int) {
         val detail = when (code) {
-            2 -> "This device offers no Vulkan 1.3 renderer. The engine needs a " +
-                "Vulkan 1.3 driver (Android 12 or newer with up-to-date GPU " +
-                "drivers); the GLES 3.2 fallback backend for older devices " +
-                "arrives in a later milestone."
+            2 -> "An OpenGL ES 2 or 3 context could not be created. " +
+                "Restart the phone and check for system updates. Vulkan is not required."
             else -> "Check logcat (tags NovaMain / nova) for the detailed reason."
         }
         AlertDialog.Builder(this)

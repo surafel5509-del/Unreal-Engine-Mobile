@@ -1,6 +1,7 @@
 #include "renderer/Renderer.h"
 
 #include "core/Assert.h"
+#include "renderer/GlesShaders.h"
 #include "core/Log.h"
 
 #include <cstring>
@@ -17,6 +18,45 @@ constexpr std::array<float, 18> kTriangleVertices = {
     0.0f,  0.75f, 0.0f, 0.486f, 0.302f, 1.0f,   // top     — #7C4DFF
     -0.75f, -0.65f, 0.0f, 0.0f,  0.898f, 1.0f,  // bottomL — #00E5FF
     0.75f, -0.65f, 0.0f, 1.0f,  0.302f, 0.553f, // bottomR — #FF4D8D
+};
+
+constexpr std::array<float, 216> kCubeVertices = {
+    -0.500f, -0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
+    0.500f, -0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
+    0.500f, 0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
+    -0.500f, -0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
+    0.500f, 0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
+    -0.500f, 0.500f, 0.500f, 0.620f, 0.700f, 1.000f,
+    0.500f, -0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
+    -0.500f, -0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
+    -0.500f, 0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
+    0.500f, -0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
+    -0.500f, 0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
+    0.500f, 0.500f, -0.500f, 0.350f, 0.450f, 0.750f,
+    -0.500f, -0.500f, -0.500f, 0.450f, 0.550f, 0.880f,
+    -0.500f, -0.500f, 0.500f, 0.450f, 0.550f, 0.880f,
+    -0.500f, 0.500f, 0.500f, 0.450f, 0.550f, 0.880f,
+    -0.500f, -0.500f, -0.500f, 0.450f, 0.550f, 0.880f,
+    -0.500f, 0.500f, 0.500f, 0.450f, 0.550f, 0.880f,
+    -0.500f, 0.500f, -0.500f, 0.450f, 0.550f, 0.880f,
+    0.500f, -0.500f, 0.500f, 0.500f, 0.620f, 0.950f,
+    0.500f, -0.500f, -0.500f, 0.500f, 0.620f, 0.950f,
+    0.500f, 0.500f, -0.500f, 0.500f, 0.620f, 0.950f,
+    0.500f, -0.500f, 0.500f, 0.500f, 0.620f, 0.950f,
+    0.500f, 0.500f, -0.500f, 0.500f, 0.620f, 0.950f,
+    0.500f, 0.500f, 0.500f, 0.500f, 0.620f, 0.950f,
+    -0.500f, 0.500f, 0.500f, 0.800f, 0.850f, 1.000f,
+    0.500f, 0.500f, 0.500f, 0.800f, 0.850f, 1.000f,
+    0.500f, 0.500f, -0.500f, 0.800f, 0.850f, 1.000f,
+    -0.500f, 0.500f, 0.500f, 0.800f, 0.850f, 1.000f,
+    0.500f, 0.500f, -0.500f, 0.800f, 0.850f, 1.000f,
+    -0.500f, 0.500f, -0.500f, 0.800f, 0.850f, 1.000f,
+    -0.500f, -0.500f, -0.500f, 0.300f, 0.380f, 0.600f,
+    0.500f, -0.500f, -0.500f, 0.300f, 0.380f, 0.600f,
+    0.500f, -0.500f, 0.500f, 0.300f, 0.380f, 0.600f,
+    -0.500f, -0.500f, -0.500f, 0.300f, 0.380f, 0.600f,
+    0.500f, -0.500f, 0.500f, 0.300f, 0.380f, 0.600f,
+    -0.500f, -0.500f, 0.500f, 0.300f, 0.380f, 0.600f,
 };
 
 }  // namespace
@@ -44,8 +84,8 @@ nova::Result<void, InitError> Renderer::init(
     rhi::IDevice& device, std::span<const u32> backgroundVert,
     std::span<const u32> backgroundFrag, std::span<const u32> triangleVert,
     std::span<const u32> triangleFrag) {
-    NOVA_ENSURE(backgroundVert.size() > 0 && backgroundFrag.size() > 0 &&
-                    triangleVert.size() > 0 && triangleFrag.size() > 0,
+    NOVA_ENSURE(device.usesGlsl() || (backgroundVert.size() > 0 && backgroundFrag.size() > 0 &&
+                    triangleVert.size() > 0 && triangleFrag.size() > 0),
                 "renderer init requires four SPIR-V blobs");
 
     shutdown();
@@ -62,6 +102,10 @@ nova::Result<void, InitError> Renderer::init(
         desc.stage = stage;
         desc.spirv = blob;
         desc.debugName = name;
+        if (std::strcmp(name, "background.vert") == 0) desc.glsl = gles::backgroundVertex;
+        else if (std::strcmp(name, "background.frag") == 0) desc.glsl = gles::backgroundFragment;
+        else if (stage == rhi::ShaderStage::Vertex) desc.glsl = gles::meshVertex;
+        else desc.glsl = gles::meshFragment;
         auto module = device.createShaderModule(desc);
         if (module == nullptr) {
             NOVA_LOG_ERROR("renderer: failed to create shader module '%s'", name);
@@ -86,7 +130,7 @@ nova::Result<void, InitError> Renderer::init(
     rhi::BufferDesc vertexDesc{};
     vertexDesc.usage = rhi::BufferUsage::Vertex;
     vertexDesc.domain = rhi::BufferDomain::HostVisible;
-    vertexDesc.size = sizeof(kTriangleVertices);
+    vertexDesc.size = sizeof(kTriangleVertices) + sizeof(kCubeVertices);
     vertexDesc.debugName = "nova.triangle.vertices";
     m_vertexBuffer = device.createBuffer(vertexDesc);
     if (m_vertexBuffer == nullptr) {
@@ -95,6 +139,8 @@ nova::Result<void, InitError> Renderer::init(
     }
     std::memcpy(m_vertexBuffer->mappedData(), kTriangleVertices.data(),
                 sizeof(kTriangleVertices));
+    std::memcpy(static_cast<u8*>(m_vertexBuffer->mappedData()) + sizeof(kTriangleVertices),
+                kCubeVertices.data(), sizeof(kCubeVertices));
 
     // One persistently mapped UBO per frame slot (matches frames-in-flight),
     // sliced per object: slice 0 is the camera/background block, slices 1..N
@@ -183,7 +229,9 @@ bool Renderer::ensurePipelines(rhi::Format colorFormat) {
     triangle.vertexBinding.attributeCount = 2;
     triangle.vertexBinding.attributes[0] = {0, rhi::Format::RGB32_SFloat, 0};
     triangle.vertexBinding.attributes[1] = {1, rhi::Format::RGB32_SFloat, 12};
-    triangle.cull = rhi::CullMode::Back;
+    triangle.cull = rhi::CullMode::None;
+    triangle.depthTest = m_device->usesGlsl();
+    triangle.depthWrite = m_device->usesGlsl();
     triangle.blend = rhi::BlendMode::Opaque;
     triangle.colorFormats[0] = colorFormat;
     triangle.colorAttachmentCount = 1;
@@ -204,7 +252,8 @@ bool Renderer::ensurePipelines(rhi::Format colorFormat) {
 
 rhi::IPipeline* Renderer::pipelineFor(BuiltinMesh mesh) const {
     switch (mesh) {
-        case BuiltinMesh::kTriangle: return m_trianglePipeline.get();
+        case BuiltinMesh::kTriangle:
+        case BuiltinMesh::kCube: return m_trianglePipeline.get();
         case BuiltinMesh::kNone: break;
     }
     return nullptr;
@@ -213,6 +262,7 @@ rhi::IPipeline* Renderer::pipelineFor(BuiltinMesh mesh) const {
 u32 Renderer::vertexCountFor(BuiltinMesh mesh) {
     switch (mesh) {
         case BuiltinMesh::kTriangle: return 3;
+        case BuiltinMesh::kCube: return 36;
         case BuiltinMesh::kNone: break;
     }
     return 0;
@@ -284,13 +334,14 @@ bool Renderer::render(rhi::FrameInfo& frame, const SceneSnapshot& snapshot) {
 
         FrameUniforms slice = base;
         slice.transform = snapshot.viewProjection * command.world;
+        slice.accent = command.tint;
         const nova::core::usize offset = (index + 1) * kUniformSliceBytes;
         std::memcpy(uniformBytes + offset, &slice, sizeof(slice));
 
         commands->bindPipeline(pipeline);
         commands->bindVertexBuffer(m_vertexBuffer.get());
         commands->bindUniformBuffer(0, m_uniforms[slot].get(), offset, sizeof(FrameUniforms));
-        commands->draw(vertexCount);
+        commands->draw(vertexCount, 1, command.mesh == BuiltinMesh::kCube ? 3 : 0);
         ++draws;
     }
 

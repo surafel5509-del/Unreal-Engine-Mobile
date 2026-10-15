@@ -110,7 +110,7 @@ JNIEXPORT jint JNICALL
 Java_com_nova_engine_NativeBridge_nativeInit(JNIEnv* env, jobject /*thiz*/,
                                              jobject assetManager, jstring dataPath,
                                              jint width, jint height,
-                                             jboolean enableValidation) {
+                                             jboolean enableValidation, jint androidApi) {
     if (g_engine != nullptr) {
         return static_cast<jint>(nova::EngineError::AlreadyInitialized);
     }
@@ -144,6 +144,7 @@ Java_com_nova_engine_NativeBridge_nativeInit(JNIEnv* env, jobject /*thiz*/,
     config.initialWidth = static_cast<unsigned>(width > 0 ? width : 0);
     config.initialHeight = static_cast<unsigned>(height > 0 ? height : 0);
     config.enableValidation = validation;
+    config.preferredGlesMajor = androidApi >= 26 ? 3 : 2;
 
     g_engine = std::make_unique<nova::Engine>();
     const nova::Result<void, nova::EngineError> result = g_engine->init(config);
@@ -300,6 +301,16 @@ Java_com_nova_engine_NativeBridge_nativeExecConsole(JNIEnv* env, jobject /*thiz*
     const std::string output =
         g_engine != nullptr ? g_engine->exec(cmd.c_str()) : "engine not initialized";
     return env->NewStringUTF(output.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nova_engine_NativeBridge_nativeSetScene(JNIEnv* env, jobject, jstring json) {
+    if (!json || env->GetStringUTFLength(json) > 65536)
+        return env->NewStringUTF("error: scene is missing or exceeds 64 KiB");
+    ScopedUtfChars text(env, json);
+    if (!text.isValid()) return env->NewStringUTF("error: unreadable scene");
+    const std::string result = g_engine ? g_engine->setScene(text.c_str()) : "error: engine not initialized";
+    return env->NewStringUTF(result.c_str());
 }
 
 }  // extern "C"

@@ -17,7 +17,7 @@ project(NovaEngine VERSION 0.1.0 LANGUAGES CXX)
 option(NOVA_BUILD_TESTS "Build unit tests (host builds only)" ON)
 option(NOVA_HOST_CHECK "Compile-check Android-only sources on this host" OFF)
 option(NOVA_ENABLE_RHI_VULKAN "Compile the Vulkan 1.3 RHI backend" ON)
-option(NOVA_ENABLE_RHI_GLES "Compile the OpenGL ES 3.2 RHI backend" OFF)
+option(NOVA_ENABLE_RHI_GLES "Compile the OpenGL ES 2/3 RHI backend" OFF)
 option(NOVA_ENABLE_PHYSICS "Physics module (Jolt)" OFF)
 option(NOVA_ENABLE_AUDIO "Audio module (Oboe/miniaudio)" OFF)
 option(NOVA_ENABLE_LUA "Lua scripting (Sol2)" OFF)
@@ -37,10 +37,7 @@ foreach(module physics audio lua net ui animation profiler)
                        "subsystem ships with a later milestone — nothing to build yet")
     endif()
 endforeach()
-if(NOVA_ENABLE_RHI_GLES)
-    message(STATUS "nova: NOVA_ENABLE_RHI_GLES=ON, but the GLES backend ships after M1 — "
-                   "nothing to build yet")
-endif()
+
 
 # ---------------------------------------------------------------------------
 # Toolchain / global flags
@@ -91,11 +88,9 @@ if(ANDROID)
 
     find_library(nova_log_lib log REQUIRED)
     find_library(nova_android_lib android REQUIRED)
-    find_library(nova_vulkan_lib vulkan REQUIRED)
     target_link_libraries(nova PRIVATE
         ${nova_log_lib}
         ${nova_android_lib}
-        ${nova_vulkan_lib}
     )
 
     if(NOVA_ENABLE_SANITIZERS)

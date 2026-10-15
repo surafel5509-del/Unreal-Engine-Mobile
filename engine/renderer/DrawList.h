@@ -31,6 +31,7 @@ namespace nova::renderer {
 enum class BuiltinMesh : core::u8 {
     kNone = 0,
     kTriangle = 1,
+    kCube = 2,
 };
 
 /// Component marking an entity as drawable with a renderer-owned mesh.

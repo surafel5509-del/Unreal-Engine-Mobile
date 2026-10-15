@@ -61,6 +61,7 @@ add_library(nova_engine STATIC
     ${NOVA_SCENE_SOURCES}
     ${NOVA_ASSETS_SOURCES}
     ${NOVA_ENGINE_SOURCES}
+    editor_core/SceneDocument.cpp
 )
 
 # Public includes: engine modules are referenced as "core/Log.h", "rhi/...".
@@ -127,7 +128,15 @@ if(NOVA_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_link_options(nova_engine PUBLIC -fsanitize=address)
 endif()
 
-if(ANDROID)
+if(ANDROID AND NOVA_ENABLE_RHI_GLES)
+    target_sources(nova_engine PRIVATE rhi/gles/GlesDevice.cpp)
+    target_compile_definitions(nova_engine PUBLIC NOVA_GLES_COMPILED=1)
+    find_library(nova_egl_lib EGL REQUIRED)
+    find_library(nova_gles_lib GLESv2 REQUIRED)
+    target_link_libraries(nova_engine INTERFACE ${nova_egl_lib} ${nova_gles_lib})
+endif()
+
+if(ANDROID AND NOVA_ENABLE_RHI_VULKAN)
     # Carried to libnova.so through the link interface.
     find_library(nova_engine_vulkan_lib vulkan REQUIRED)
     target_link_libraries(nova_engine INTERFACE ${nova_engine_vulkan_lib})

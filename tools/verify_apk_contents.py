@@ -5,7 +5,7 @@ import sys
 import zipfile
 
 # ELF class and e_machine for each Android ABI (little-endian ELF).
-ARM_ABIS = {"arm64-v8a": (2, 183), "armeabi-v7a": (1, 40)}
+ARM_ABIS = {"arm64-v8a": (2, 183), "armeabi-v7a": (1, 40), "x86": (1, 3), "x86_64": (2, 62)}
 # The project uses CMake/NDK's default static C++ runtime.
 LIBRARIES = ("libnova.so",)
 

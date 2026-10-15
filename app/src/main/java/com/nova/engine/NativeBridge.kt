@@ -45,6 +45,7 @@ object NativeBridge {
         width: Int,
         height: Int,
         enableValidation: Boolean,
+        androidApi: Int,
     ): Int
 
     /** Hand a Surface to the engine (null releases the previous one). */
@@ -78,4 +79,7 @@ object NativeBridge {
 
     /** Execute an engine console command; returns the command output. */
     external fun nativeExecConsole(cmd: String): String
+
+    /** Validate and atomically replace the editable scene. Returns "ok" or an error. */
+    external fun nativeSetScene(json: String): String
 }

@@ -20,6 +20,7 @@
 //             -> shutdown(). init() may be called again after shutdown().
 
 #include "core/Console.h"
+#include "editor_core/SceneDocument.h"
 #include "core/Log.h"
 #include "core/Result.h"
 #include "core/Time.h"
@@ -65,6 +66,7 @@ struct EngineConfig {
     unsigned initialWidth = 0;
     unsigned initialHeight = 0;
     bool enableValidation = false;
+    int preferredGlesMajor = 2;
 };
 
 /// Aggregate statistics surfaced through `exec("stats")`.
@@ -108,6 +110,8 @@ public:
     /// Execute a console line; returns the output (never empty for errors).
     std::string exec(const std::string& line);
 
+    std::string setScene(const std::string& json);
+
     bool isInitialized() const;
     bool isPaused() const;
     EngineStats stats() const;
@@ -149,6 +153,10 @@ private:
     std::vector<scene::Entity> m_visible;         // reused, never reallocated after warm-up
     std::vector<renderer::DrawCommand> m_drawCommands;  // reused, see SceneSnapshot
     scene::CullStats m_lastCull{};
+
+    std::vector<scene::Entity> m_editorEntities;
+    std::vector<editor::Object> m_editorObjects;
+    bool m_playing = false;
 
     // frame bookkeeping
     core::Stopwatch m_uptime;

@@ -3,6 +3,7 @@
 #include "core/Assert.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -19,7 +20,7 @@ const char* engineErrorMessage(EngineError error) {
     switch (error) {
         case EngineError::Ok: return "ok";
         case EngineError::InvalidArgument: return "invalid argument";
-        case EngineError::DeviceCreateFailed: return "Vulkan device creation failed";
+        case EngineError::DeviceCreateFailed: return "graphics device creation failed";
         case EngineError::AssetLoadFailed: return "shader/asset load failed";
         case EngineError::RendererInitFailed: return "renderer initialization failed";
         case EngineError::AlreadyInitialized: return "engine already initialized";
@@ -61,6 +62,7 @@ Result<void, EngineError> Engine::init(const EngineConfig& config) {
     rhi::DeviceDesc deviceDesc{};
     deviceDesc.appName = "NovaEngine";
     deviceDesc.enableValidation = config.enableValidation;
+    deviceDesc.preferredGlesMajor = config.preferredGlesMajor;
     deviceDesc.presentMode = rhi::PresentMode::Fifo;
     m_device = rhi::createDevice(deviceDesc);
     if (m_device == nullptr) {
@@ -74,10 +76,10 @@ Result<void, EngineError> Engine::init(const EngineConfig& config) {
     std::vector<core::u32> backgroundFrag;
     std::vector<core::u32> triangleVert;
     std::vector<core::u32> triangleFrag;
-    if (!loadShader("shaders/background.vert.spv", backgroundVert) ||
+    if (!m_device->usesGlsl() && (!loadShader("shaders/background.vert.spv", backgroundVert) ||
         !loadShader("shaders/background.frag.spv", backgroundFrag) ||
         !loadShader("shaders/triangle.vert.spv", triangleVert) ||
-        !loadShader("shaders/triangle.frag.spv", triangleFrag)) {
+        !loadShader("shaders/triangle.frag.spv", triangleFrag))) {
         shutdownLocked();
         return Result<void, EngineError>::failure(EngineError::AssetLoadFailed);
     }
@@ -122,6 +124,10 @@ void Engine::shutdownLocked() {
     if (m_world.isAlive(m_cameraEntity)) {
         m_world.destroy(m_cameraEntity);
     }
+    for (auto entity : m_editorEntities) m_world.destroy(entity);
+    m_editorEntities.clear();
+    m_editorObjects.clear();
+    m_playing = false;
     m_cameraEntity = scene::kNullEntity;
     m_demoEntity = scene::kNullEntity;
     m_hierarchy.reset();
@@ -189,6 +195,27 @@ void Engine::createDemoScene() {
                   static_cast<unsigned>(m_demoEntity.generation));
 }
 
+std::string Engine::setScene(const std::string& json) {
+    auto parsed = editor::parseScene(json);
+    if (!parsed) return "error: " + parsed.error();
+    std::lock_guard<std::mutex> guard(m_mutex);
+    if (!m_initialized) return "error: engine not initialized";
+    if (m_world.isAlive(m_demoEntity)) m_world.destroy(m_demoEntity);
+    m_demoEntity = scene::kNullEntity;
+    for (auto entity : m_editorEntities) m_world.destroy(entity);
+    m_editorEntities.clear();
+    m_editorObjects = std::move(parsed.value());
+    for (const auto& object : m_editorObjects) {
+        const auto entity = m_world.create();
+        m_world.add<scene::Transform>(entity, object.transform);
+        m_world.add<scene::Bounds>(entity, scene::Bounds{math::Vec3(0.0f), math::Vec3(0.75f)});
+        m_world.add<renderer::MeshRef>(entity, renderer::MeshRef{object.mesh, object.tint});
+        m_editorEntities.push_back(entity);
+    }
+    m_hierarchy.reset();
+    return "ok";
+}
+
 bool Engine::updateScene(f32 width, f32 height, renderer::SceneSnapshot& snapshot) {
     // Caller holds m_mutex.
     const f32 aspect = height > 0.0f ? width / height : 1.0f;
@@ -200,6 +227,12 @@ bool Engine::updateScene(f32 width, f32 height, renderer::SceneSnapshot& snapsho
             math::quatRotationY(m_engineTime * 0.9f) * math::quatRotationZ(m_engineTime * 0.55f);
     }
 
+    for (usize i = 0; i < m_editorEntities.size(); ++i) {
+        if (auto* transform = m_world.get<scene::Transform>(m_editorEntities[i])) {
+            *transform = m_editorObjects[i].transform;
+            if (m_playing) transform->rotation = math::quatRotationY(m_engineTime * 0.6f) * transform->rotation;
+        }
+    }
     renderer::SceneStageInput stageInput{};
     stageInput.world = &m_world;
     stageInput.hierarchy = &m_hierarchy;
@@ -284,7 +317,7 @@ int Engine::frame(float dtSeconds) {
         return kFrameSkipped;
     }
 
-    m_engineTime += dt;
+    if (m_playing) m_engineTime += dt;
 
     // Scene stage: animate -> hierarchy -> cull -> sort -> draw list. It runs
     // after beginFrame() because the camera's aspect ratio comes from the
@@ -385,10 +418,29 @@ EngineStats Engine::stats() const {
 }
 
 void Engine::registerConsoleCommands() {
+    m_console.registerCommand("camera", "camera <distance 1.5..20>", [this](core::Console::Arguments args) {
+        if (args.size() != 1) return std::string("usage: camera <1.5..20>");
+        char* end = nullptr;
+        const float distance = std::strtof(args[0].c_str(), &end);
+        if (end == args[0].c_str() || *end != '\0' || !std::isfinite(distance) || distance < 1.5f || distance > 20.0f)
+            return std::string("camera distance must be 1.5 to 20");
+        if (auto* transform = m_world.get<scene::Transform>(m_cameraEntity)) transform->position.z = distance;
+        return std::string("Camera distance: ") + args[0];
+    });
+    m_console.registerCommand("play", "Play preview animation", [this](core::Console::Arguments) {
+        m_playing = true; return std::string("Playing");
+    });
+    m_console.registerCommand("stop", "Stop preview and restore authored transforms", [this](core::Console::Arguments) {
+        m_playing = false; m_engineTime = 0; return std::string("Stopped");
+    });
+    m_console.registerCommand("graphics", "Show active graphics backend", [this](core::Console::Arguments) {
+        return std::string(m_device ? m_device->backendName() : "no device");
+    });
     m_console.registerCommand(
         "stats", "Print runtime statistics (fps, frame, swapchain, memory counters)",
         [this](core::Console::Arguments) -> std::string {
             std::ostringstream out;
+            out << "editor_objects=" << m_editorObjects.size() << " playing=" << (m_playing ? "yes" : "no") << "\n";
             out << "fps=" << m_fpsEma << " frame_ms=" << m_lastFrameMillis
                 << " cpu_ms=" << m_lastFrameCpuMillis
                 << " frames=" << m_frameCount
@@ -396,6 +448,7 @@ void Engine::registerConsoleCommands() {
                 << " paused=" << (m_paused ? "yes" : "no") << "\n";
             if (m_device != nullptr) {
                 const rhi::DeviceStats& deviceStats = m_device->stats();
+                out << "backend=" << m_device->backendName() << "\n";
                 out << "swapchain=" << deviceStats.width << "x" << deviceStats.height
                     << " images=" << deviceStats.imageCount
                     << " fif=" << deviceStats.framesInFlight

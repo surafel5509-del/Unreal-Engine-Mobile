@@ -15,7 +15,7 @@ val novaProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 fun novaProp(key: String, default: String): String =
-    novaProps.getProperty(key, default)
+    providers.gradleProperty(key).orNull ?: novaProps.getProperty(key, default)
 
 android {
     namespace = "com.nova.engine"
@@ -24,15 +24,13 @@ android {
 
     defaultConfig {
         applicationId = "com.nova.engine"
-        // Android 7.0. The Vulkan 1.3 renderer self-selects at runtime: a
-        // device whose driver lacks Vulkan 1.3 fails device creation, and
-        // MainActivity.showInitFailure explains that on screen instead of the
-        // installer rejecting the package. The GLES 3.2 fallback backend for
-        // such devices is a later milestone (see docs/MILESTONES.md).
-        minSdk = 24
+        // Android 5+. GLES 2 on API 21-25; prefer GLES 3 on API 26+,
+        // retrying GLES 2 when the GPU/driver cannot create an ES 3 context.
+        minSdk = 21
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.1.2"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 4
+        versionName = "0.2.0"
 
         externalNativeBuild {
             cmake {
@@ -43,12 +41,14 @@ android {
                     // nativeInit(), which forwards it to the Vulkan device
                     // description. Nothing here needs a compile-time switch.
                     "-DNOVA_BUILD_TESTS=OFF",
+                    "-DNOVA_ENABLE_RHI_VULKAN=OFF",
+                    "-DNOVA_ENABLE_RHI_GLES=ON",
                 )
             }
         }
 
         ndk {
-            abiFilters += novaProp("nova.abiFilters", "arm64-v8a,armeabi-v7a").split(",").map { it.trim() }
+            abiFilters += novaProp("nova.abiFilters", "arm64-v8a,armeabi-v7a,x86,x86_64").split(",").map { it.trim() }
         }
     }
 
@@ -113,7 +113,8 @@ android {
 
     packaging {
         jniLibs {
-            useLegacyPackaging = false
+            // Extract native libraries on old Android; avoid direct-mmap constraints.
+            useLegacyPackaging = true
         }
     }
 }
@@ -208,4 +209,11 @@ fun findShaderCompiler(): File? {
         }
     }
     return null
+}
+
+// Emulator integration tests exercise real EGL, JNI and the editor controls.
+dependencies {
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:core:1.5.0")
 }

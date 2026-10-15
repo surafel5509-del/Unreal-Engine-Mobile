@@ -31,7 +31,7 @@ class NovaRuntime {
         private const val MAX_FRAME_SECONDS = 0.25f
 
         /** Retry cadence when the native side skips a frame. */
-        private const val SKIP_SLEEP_MS = 4L
+        private const val SKIP_SLEEP_MS = 16L
     }
 
     private val lock = ReentrantLock()
@@ -122,10 +122,7 @@ class NovaRuntime {
         }
         thread?.let {
             try {
-                it.join(4000)
-                if (it.isAlive) {
-                    Log.e(TAG, "Render thread did not stop in time")
-                }
+                it.join() // never destroy native state while a frame still uses it
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
@@ -153,11 +150,19 @@ class NovaRuntime {
                 dt = 1.0f / 60.0f
             }
 
-            val status = NativeBridge.nativeFrame(dt)
-
-            lock.withLock {
-                inFrame = false
-                idle.signalAll()
+            val status = try {
+                NativeBridge.nativeFrame(dt)
+            } finally {
+                lock.withLock {
+                    inFrame = false
+                    idle.signalAll()
+                }
+            }
+            // Some drivers/emulators do not block in swap even with interval 1.
+            // Bound idle editor rendering to ~60 FPS rather than burning CPU.
+            val remaining = 16_666_667L - (System.nanoTime() - now)
+            if (remaining > 0 && status != NativeBridge.FRAME_SKIPPED) {
+                java.util.concurrent.locks.LockSupport.parkNanos(remaining)
             }
 
             if (status == NativeBridge.FRAME_SKIPPED) {

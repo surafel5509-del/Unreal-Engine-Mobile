@@ -29,6 +29,7 @@ namespace nova::rhi {
 
 struct DeviceDesc {
     const char* appName = "NovaEngine";
+    int preferredGlesMajor = 2;
     bool enableValidation = false;
     /// Requested present pacing (falls back to FIFO when unsupported).
     PresentMode presentMode = PresentMode::Fifo;
@@ -49,6 +50,8 @@ struct FrameInfo {
 class IDevice {
 public:
     virtual ~IDevice() = default;
+    virtual bool usesGlsl() const { return false; }
+    virtual const char* backendName() const { return "Vulkan"; }
 
     // -- resources ---------------------------------------------------------
     virtual Unique<IBuffer> createBuffer(const BufferDesc& desc) = 0;

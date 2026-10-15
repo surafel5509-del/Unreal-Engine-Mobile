@@ -15,6 +15,7 @@ add_executable(nova_tests
     test_drawlist.cpp
     test_json.cpp
     test_base64.cpp
+    test_editor_scene.cpp
 )
 
 target_include_directories(nova_tests SYSTEM PRIVATE
